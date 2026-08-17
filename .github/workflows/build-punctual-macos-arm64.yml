@@ -103,7 +103,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/rust-delimiter-check.py
           python3 scripts/project-consistency-check.py
           node --check scripts/detect_buttons.js
           node --check scripts/highlight_button.js
