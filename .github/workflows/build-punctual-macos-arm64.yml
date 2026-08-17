@@ -64,6 +64,7 @@ jobs:
 
           python3 - <<'PY'
           import base64
+          import re
           from pathlib import Path
 
           payloads = [
@@ -76,10 +77,11 @@ jobs:
               encoded = b"".join(Path(source).read_bytes().split())
               Path(target).write_bytes(base64.b64decode(encoded, validate=True))
 
-          alpha5 = b"".join(
+          transported = b"".join(
               part.read_bytes()
               for part in sorted(Path("payloads/punctual-macos-arm64/overlay-browser-alpha5").glob("part-*"))
           )
+          alpha5 = re.sub(rb"[^A-Za-z0-9+/=]", b"", transported)
           Path("overlay-browser-alpha5.tar.xz").write_bytes(base64.b64decode(alpha5, validate=True))
           PY
 
