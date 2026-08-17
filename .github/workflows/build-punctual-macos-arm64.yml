@@ -71,12 +71,28 @@ jobs:
           PY
           overlay_expected="8578bb9c595ffc5fcf944311754dfb383e952dbd306fb7783d30dc841c6c8f7d"
           overlay_actual="$(shasum -a 256 overlay-scripts.tar.xz | awk '{print $1}')"
-          echo "Overlay SHA-256: ${overlay_actual}"
+          echo "Scripts overlay SHA-256: ${overlay_actual}"
           test "${overlay_actual}" = "${overlay_expected}"
           tar -xJf overlay-scripts.tar.xz -C work/punctual-click
           test -f work/punctual-click/scripts/detect_buttons.js
           test -f work/punctual-click/scripts/highlight_button.js
           test -f work/punctual-click/scripts/probe_target.js
+
+          python3 - <<'PY'
+          import base64
+          from pathlib import Path
+
+          encoded = Path("payloads/punctual-macos-arm64/overlay-app.tar.xz.b64").read_bytes()
+          archive = base64.b64decode(encoded, validate=True)
+          Path("overlay-app.tar.xz").write_bytes(archive)
+          PY
+          app_overlay_expected="2493959afffb3a7637506c027d970dd2e2af4f03a72e17b0a2f410f9d9fb784f"
+          app_overlay_actual="$(shasum -a 256 overlay-app.tar.xz | awk '{print $1}')"
+          echo "App overlay SHA-256: ${app_overlay_actual}"
+          test "${app_overlay_actual}" = "${app_overlay_expected}"
+          tar -xJf overlay-app.tar.xz -C work/punctual-click
+          test -f work/punctual-click/crates/punctual-app/src/dashboard.rs
+          test -f work/punctual-click/crates/punctual-app/src/main.rs
 
       - name: Install stable Rust toolchain
         shell: bash
