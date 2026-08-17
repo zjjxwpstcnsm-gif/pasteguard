@@ -25,7 +25,8 @@ jobs:
           base64 --decode /tmp/pasteguard-source.b64 > /tmp/pasteguard-source.tar.gz
           echo '8d1966e68b044764ad369b7781ea8a9e5690ae9b0f9da194667833b560a05ef3  /tmp/pasteguard-source.tar.gz' | sha256sum -c -
           tar -xzf /tmp/pasteguard-source.tar.gz -C .
-          rm -rf bootstrap .github/workflows/bootstrap.yml
+          rm -f .github/workflows/ci.yml .github/workflows/pages.yml
+          rm -rf bootstrap
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
