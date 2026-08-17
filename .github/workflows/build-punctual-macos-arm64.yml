@@ -1,0 +1,174 @@
+name: Build Punctual macOS ARM64
+
+on:
+  push:
+    branches:
+      - punctual-macos-arm64-build-20260817
+    paths:
+      - "build/punctual-macos-arm64/**"
+      - ".github/workflows/build-punctual-macos-arm64.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: punctual-macos-arm64-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and package ARM64 DMG
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out temporary build branch
+        uses: actions/checkout@v4
+
+      - name: Confirm native Apple Silicon runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Runner architecture: $(uname -m)"
+          test "$(uname -m)" = "arm64"
+          xcodebuild -version
+
+      - name: Reconstruct and verify source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat build/punctual-macos-arm64/chunks/part-* > punctual-source.b64
+          python3 - <<'PY'
+          import base64
+          from pathlib import Path
+
+          encoded = Path("punctual-source.b64").read_bytes()
+          archive = base64.b64decode(encoded, validate=True)
+          Path("punctual-source.tar.xz").write_bytes(archive)
+          PY
+
+          expected="17402d1468c1bb9d06fe6cfbdabacc14c64e99cd9086a4f4f5025d8797c92efd"
+          actual="$(shasum -a 256 punctual-source.tar.xz | awk '{print $1}')"
+          echo "Archive SHA-256: ${actual}"
+          test "${actual}" = "${expected}"
+
+          mkdir -p work
+          tar -xJf punctual-source.tar.xz -C work
+          test -f work/punctual-click/Cargo.toml
+
+          if [[ -d build/punctual-macos-arm64/overlay ]]; then
+            rsync -a build/punctual-macos-arm64/overlay/ work/punctual-click/
+          fi
+
+      - name: Install stable Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version --verbose
+          cargo --version
+
+      - name: Compile Punctual release binary
+        working-directory: work/punctual-click
+        env:
+          CARGO_TERM_COLOR: always
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release -p punctual-app
+          test -x target/release/punctual-app
+
+      - name: Assemble ad-hoc signed app bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="dist/Punctual.app"
+          CONTENTS="${APP}/Contents"
+          MACOS="${CONTENTS}/MacOS"
+          RESOURCES="${CONTENTS}/Resources"
+
+          rm -rf dist
+          mkdir -p "${MACOS}" "${RESOURCES}"
+          cp work/punctual-click/target/release/punctual-app "${MACOS}/Punctual"
+          chmod 755 "${MACOS}/Punctual"
+
+          cat > "${CONTENTS}/Info.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleDevelopmentRegion</key>
+            <string>zh_CN</string>
+            <key>CFBundleDisplayName</key>
+            <string>Punctual</string>
+            <key>CFBundleExecutable</key>
+            <string>Punctual</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.punctual.desktop</string>
+            <key>CFBundleInfoDictionaryVersion</key>
+            <string>6.0</string>
+            <key>CFBundleName</key>
+            <string>Punctual</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleShortVersionString</key>
+            <string>0.1.0-alpha.2</string>
+            <key>CFBundleVersion</key>
+            <string>2</string>
+            <key>LSArchitecturePriority</key>
+            <array>
+              <string>arm64</string>
+            </array>
+            <key>LSMinimumSystemVersion</key>
+            <string>12.0</string>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+            <key>NSPrincipalClass</key>
+            <string>NSApplication</string>
+          </dict>
+          </plist>
+          PLIST
+
+          plutil -lint "${CONTENTS}/Info.plist"
+          codesign --force --deep --sign - --timestamp=none "${APP}"
+          codesign --verify --deep --strict --verbose=2 "${APP}"
+
+          file "${MACOS}/Punctual"
+          archs="$(lipo -archs "${MACOS}/Punctual")"
+          echo "Mach-O architectures: ${archs}"
+          test "${archs}" = "arm64"
+          otool -L "${MACOS}/Punctual"
+
+      - name: Build and verify DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          DMG_ROOT="dist/dmg-root"
+          DMG="dist/Punctual-macos-arm64.dmg"
+
+          mkdir -p "${DMG_ROOT}"
+          cp -R "dist/Punctual.app" "${DMG_ROOT}/Punctual.app"
+          ln -s /Applications "${DMG_ROOT}/Applications"
+
+          hdiutil create \
+            -volname "Punctual" \
+            -srcfolder "${DMG_ROOT}" \
+            -ov \
+            -format UDZO \
+            "${DMG}"
+
+          hdiutil verify "${DMG}"
+          shasum -a 256 "${DMG}" | tee "dist/Punctual-macos-arm64.dmg.sha256"
+          ls -lh "${DMG}" "dist/Punctual-macos-arm64.dmg.sha256"
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Punctual-macos-arm64
+          path: |
+            dist/Punctual-macos-arm64.dmg
+            dist/Punctual-macos-arm64.dmg.sha256
+          if-no-files-found: error
+          retention-days: 1
