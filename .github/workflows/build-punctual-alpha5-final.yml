@@ -1,0 +1,327 @@
+name: Build Punctual 0.1.0-alpha.5 Final DMG
+
+on:
+  push:
+    branches:
+      - punctual-browser-auto-alpha5-20260817
+    paths:
+      - ".github/workflows/build-punctual-alpha5-final.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: punctual-alpha5-final-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and package multi-browser ARM64 DMG
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out build branch
+        uses: actions/checkout@v4
+
+      - name: Verify native Apple Silicon runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Runner architecture: $(uname -m)"
+          test "$(uname -m)" = "arm64"
+          xcodebuild -version
+
+      - name: Reconstruct verified Punctual source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          check_hash() {
+            local file="$1"
+            local expected="$2"
+            local actual
+            actual="$(shasum -a 256 "${file}" | awk '{print $1}')"
+            echo "${file} SHA-256: ${actual}"
+            test "${actual}" = "${expected}"
+          }
+
+          cat build/punctual-macos-arm64/chunks/part-* > punctual-source.b64
+          python3 - <<'PY'
+          import base64
+          import re
+          from pathlib import Path
+
+          source = b"".join(Path("punctual-source.b64").read_bytes().split())
+          Path("punctual-source.tar.xz").write_bytes(base64.b64decode(source, validate=True))
+
+          payloads = [
+              ("payloads/punctual-macos-arm64/overlay-scripts.tar.xz.b64", "overlay-scripts.tar.xz"),
+              ("payloads/punctual-macos-arm64/overlay-app.tar.xz.b64", "overlay-app.tar.xz"),
+              ("payloads/punctual-macos-arm64/overlay-product-polish.tar.xz.b64", "overlay-product-polish.tar.xz"),
+              ("payloads/punctual-macos-arm64/overlay-new-tab-alpha4.tar.xz.b64", "overlay-new-tab-alpha4.tar.xz"),
+              ("payloads/punctual-macos-arm64/overlay-browser-alpha5-fix1.tar.xz.b64", "overlay-browser-alpha5-fix1.tar.xz"),
+          ]
+          for source_path, target in payloads:
+              encoded = b"".join(Path(source_path).read_bytes().split())
+              Path(target).write_bytes(base64.b64decode(encoded, validate=True))
+
+          transported = b"".join(
+              part.read_bytes()
+              for part in sorted(Path("payloads/punctual-macos-arm64/overlay-browser-alpha5").glob("part-*"))
+          )
+          normalized = re.sub(rb"[^A-Za-z0-9+/=]", b"", transported)
+          Path("overlay-browser-alpha5.tar.xz").write_bytes(
+              base64.b64decode(normalized, validate=True)
+          )
+          PY
+
+          check_hash punctual-source.tar.xz 17402d1468c1bb9d06fe6cfbdabacc14c64e99cd9086a4f4f5025d8797c92efd
+          check_hash overlay-scripts.tar.xz 8578bb9c595ffc5fcf944311754dfb383e952dbd306fb7783d30dc841c6c8f7d
+          check_hash overlay-app.tar.xz 2493959afffb3a7637506c027d970dd2e2af4f03a72e17b0a2f410f9d9fb784f
+          check_hash overlay-product-polish.tar.xz e184f9538dc81c764291f1ef212e71c3f0a4d9595290ffa6837381d28883a16b
+          check_hash overlay-new-tab-alpha4.tar.xz f22d8cac6ececbfe54a5c8221ad595b688f09fa6467aebba6e5d991aaa903f85
+          check_hash overlay-browser-alpha5.tar.xz 8e69443222c31c76ec88706f9c554c480ffdd6115c2019994d03a61103824015
+          check_hash overlay-browser-alpha5-fix1.tar.xz 1018ef18a52a3e1ee3ef38fa184ab9ddc1e57ae33cccb007d959e7300581bbfc
+
+          mkdir -p work
+          tar -xJf punctual-source.tar.xz -C work
+          tar -xJf overlay-scripts.tar.xz -C work/punctual-click
+          tar -xJf overlay-app.tar.xz -C work/punctual-click
+          tar -xJf overlay-product-polish.tar.xz -C work/punctual-click
+          tar -xJf overlay-new-tab-alpha4.tar.xz -C work/punctual-click
+          tar -xJf overlay-browser-alpha5.tar.xz -C work/punctual-click
+          tar -xJf overlay-browser-alpha5-fix1.tar.xz -C work/punctual-click
+
+          grep -q 'version = "0.1.0-alpha.5"' work/punctual-click/Cargo.toml
+          grep -q 'ManagedChromium' work/punctual-click/crates/punctual-browser/src/discovery.rs
+          grep -q 'WebDriverSession' work/punctual-click/crates/punctual-browser/src/webdriver.rs
+          grep -q 'BrowserSession' work/punctual-click/crates/punctual-browser/src/automation.rs
+          grep -q 'browser_name' work/punctual-click/crates/punctual-core/src/message.rs
+          grep -q 'resources_dir' work/punctual-click/crates/punctual-app/src/main.rs
+
+          cd work/punctual-click
+          python3 scripts/rust-delimiter-check.py
+          node --check scripts/detect_buttons.js
+          node --check scripts/highlight_button.js
+          node --check scripts/probe_target.js
+
+      - name: Install stable Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version --verbose
+          cargo --version
+
+      - name: Restore Cargo build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            work/punctual-click/target
+          key: macos-arm64-punctual-alpha5-final-${{ hashFiles('build/punctual-macos-arm64/chunks/**', 'payloads/punctual-macos-arm64/**') }}
+          restore-keys: |
+            macos-arm64-punctual-alpha5-final-
+            macos-arm64-punctual-alpha5-
+            macos-arm64-punctual-alpha4-
+            macos-arm64-punctual-
+          save-always: true
+
+      - name: Compile release binary
+        working-directory: work/punctual-click
+        env:
+          CARGO_TERM_COLOR: never
+          CARGO_INCREMENTAL: "1"
+          CARGO_PROFILE_RELEASE_LTO: "false"
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          set +e
+          cargo build --release -p punctual-app 2>&1 | tee "$GITHUB_WORKSPACE/dist/cargo-build.log"
+          status=${PIPESTATUS[0]}
+          set -e
+          test "${status}" -eq 0
+          test -x target/release/punctual-app
+
+      - name: Upload Cargo build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Punctual-alpha5-final-cargo-build-log
+          path: dist/cargo-build.log
+          if-no-files-found: warn
+          retention-days: 1
+
+      - name: Download and verify managed browser resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUNTIME="dist/runtime"
+          mkdir -p "${RUNTIME}/managed-browser" "${RUNTIME}/bin"
+
+          require_arm64() {
+            local binary="$1"
+            local architectures
+            file "${binary}"
+            architectures="$(lipo -archs "${binary}")"
+            echo "Architectures for ${binary}: ${architectures}"
+            printf '%s\n' "${architectures}" | tr ' ' '\n' | grep -qx arm64
+          }
+
+          curl --fail --location --retry 3 \
+            https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json \
+            -o "${RUNTIME}/chrome-for-testing.json"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(Path("dist/runtime/chrome-for-testing.json").read_text())
+          stable = data["channels"]["Stable"]
+          match = next(
+              item
+              for item in stable["downloads"]["chrome"]
+              if item["platform"] == "mac-arm64"
+          )
+          Path("dist/runtime/chrome-url.txt").write_text(match["url"])
+          Path("dist/runtime/chrome-version.txt").write_text(stable["version"])
+          print(f"Chrome for Testing stable: {stable['version']}")
+          PY
+
+          curl --fail --location --retry 3 \
+            "$(cat "${RUNTIME}/chrome-url.txt")" \
+            -o "${RUNTIME}/chrome-mac-arm64.zip"
+          ditto -x -k "${RUNTIME}/chrome-mac-arm64.zip" "${RUNTIME}/chrome-extracted"
+          CHROME_APP="$(find "${RUNTIME}/chrome-extracted" -type d -name 'Google Chrome for Testing.app' -print -quit)"
+          test -n "${CHROME_APP}"
+          ditto "${CHROME_APP}" "${RUNTIME}/managed-browser/Google Chrome for Testing.app"
+
+          GECKO_VERSION="0.37.1"
+          GECKO_ARCHIVE="geckodriver-v${GECKO_VERSION}-macos-aarch64.tar.gz"
+          curl --fail --location --retry 3 \
+            "https://github.com/mozilla/geckodriver/releases/download/v${GECKO_VERSION}/${GECKO_ARCHIVE}" \
+            -o "${RUNTIME}/${GECKO_ARCHIVE}"
+          echo "d02b3f7003f999caf90974a2ef5da0286c05d01cee19112c86846d759fdba4f5  ${RUNTIME}/${GECKO_ARCHIVE}" | shasum -a 256 -c -
+          tar -xzf "${RUNTIME}/${GECKO_ARCHIVE}" -C "${RUNTIME}/bin"
+          chmod 755 "${RUNTIME}/bin/geckodriver"
+
+          CHROME_BIN="${RUNTIME}/managed-browser/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+          test -x "${CHROME_BIN}"
+          require_arm64 "${CHROME_BIN}"
+          require_arm64 "${RUNTIME}/bin/geckodriver"
+
+      - name: Assemble and verify app bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="dist/Punctual.app"
+          CONTENTS="${APP}/Contents"
+          MACOS="${CONTENTS}/MacOS"
+          RESOURCES="${CONTENTS}/Resources"
+
+          require_arm64() {
+            local binary="$1"
+            local architectures
+            file "${binary}"
+            architectures="$(lipo -archs "${binary}")"
+            echo "Architectures for ${binary}: ${architectures}"
+            printf '%s\n' "${architectures}" | tr ' ' '\n' | grep -qx arm64
+          }
+
+          rm -rf "${APP}" dist/dmg-root dist/Punctual-0.1.0-alpha.5-macos-arm64.dmg dist/Punctual-0.1.0-alpha.5-macos-arm64.dmg.sha256
+          mkdir -p "${MACOS}" "${RESOURCES}/managed-browser" "${RESOURCES}/bin"
+          cp work/punctual-click/target/release/punctual-app "${MACOS}/Punctual"
+          chmod 755 "${MACOS}/Punctual"
+          ditto "dist/runtime/managed-browser/Google Chrome for Testing.app" \
+            "${RESOURCES}/managed-browser/Google Chrome for Testing.app"
+          cp "dist/runtime/bin/geckodriver" "${RESOURCES}/bin/geckodriver"
+          chmod 755 "${RESOURCES}/bin/geckodriver"
+          cp "dist/runtime/chrome-version.txt" "${RESOURCES}/managed-browser/version.txt"
+
+          cat > "${CONTENTS}/Info.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0.dtd" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleDevelopmentRegion</key>
+            <string>zh_CN</string>
+            <key>CFBundleDisplayName</key>
+            <string>Punctual</string>
+            <key>CFBundleExecutable</key>
+            <string>Punctual</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.punctual.desktop</string>
+            <key>CFBundleInfoDictionaryVersion</key>
+            <string>6.0</string>
+            <key>CFBundleName</key>
+            <string>Punctual</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleShortVersionString</key>
+            <string>0.1.0-alpha.5</string>
+            <key>CFBundleVersion</key>
+            <string>5</string>
+            <key>LSArchitecturePriority</key>
+            <array>
+              <string>arm64</string>
+            </array>
+            <key>LSMinimumSystemVersion</key>
+            <string>12.0</string>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+            <key>NSPrincipalClass</key>
+            <string>NSApplication</string>
+          </dict>
+          </plist>
+          PLIST
+
+          plutil -lint "${CONTENTS}/Info.plist"
+          codesign --force --deep --sign - --timestamp=none \
+            "${RESOURCES}/managed-browser/Google Chrome for Testing.app"
+          codesign --force --sign - --timestamp=none "${RESOURCES}/bin/geckodriver"
+          codesign --force --deep --sign - --timestamp=none "${APP}"
+          codesign --verify --deep --strict --verbose=2 "${APP}"
+
+          require_arm64 "${MACOS}/Punctual"
+          require_arm64 "${RESOURCES}/managed-browser/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+          require_arm64 "${RESOURCES}/bin/geckodriver"
+          version="$(defaults read "$(pwd)/${CONTENTS}/Info" CFBundleShortVersionString)"
+          test "${version}" = "0.1.0-alpha.5"
+          du -sh "${APP}" "${RESOURCES}/managed-browser/Google Chrome for Testing.app"
+
+      - name: Build and verify DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          DMG_ROOT="dist/dmg-root"
+          DMG="dist/Punctual-0.1.0-alpha.5-macos-arm64.dmg"
+
+          mkdir -p "${DMG_ROOT}"
+          ditto "dist/Punctual.app" "${DMG_ROOT}/Punctual.app"
+          ln -s /Applications "${DMG_ROOT}/Applications"
+
+          hdiutil create \
+            -volname "Punctual 0.1.0-alpha.5" \
+            -srcfolder "${DMG_ROOT}" \
+            -ov \
+            -format UDZO \
+            "${DMG}"
+
+          hdiutil verify "${DMG}"
+          shasum -a 256 "${DMG}" | tee "${DMG}.sha256"
+          ls -lh "${DMG}" "${DMG}.sha256"
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Punctual-0.1.0-alpha.5-macos-arm64
+          path: |
+            dist/Punctual-0.1.0-alpha.5-macos-arm64.dmg
+            dist/Punctual-0.1.0-alpha.5-macos-arm64.dmg.sha256
+          if-no-files-found: error
+          retention-days: 1
