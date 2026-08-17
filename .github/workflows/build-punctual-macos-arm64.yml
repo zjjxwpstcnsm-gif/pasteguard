@@ -1,9 +1,9 @@
-name: Build Punctual macOS ARM64 Product Polish
+name: Build Punctual macOS ARM64 New-Tab Result Fix
 
 on:
   push:
     branches:
-      - punctual-product-polish-20260817
+      - punctual-new-tab-fix-20260817
     paths:
       - "build/punctual-macos-arm64/**"
       - "payloads/punctual-macos-arm64/**"
@@ -14,17 +14,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: punctual-product-polish-${{ github.ref }}
+  group: punctual-new-tab-alpha4-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
-    name: Build, verify and package ARM64 DMG
+    name: Test, build and package ARM64 DMG
     runs-on: macos-15
     timeout-minutes: 60
 
     steps:
-      - name: Check out temporary product-polish branch
+      - name: Check out temporary build branch
         uses: actions/checkout@v4
 
       - name: Confirm native Apple Silicon runner
@@ -44,14 +44,14 @@ jobs:
           import base64
           from pathlib import Path
 
-          encoded = Path("punctual-source.b64").read_bytes()
+          encoded = b"".join(Path("punctual-source.b64").read_bytes().split())
           Path("punctual-source.tar.xz").write_bytes(base64.b64decode(encoded, validate=True))
           PY
 
-          expected="17402d1468c1bb9d06fe6cfbdabacc14c64e99cd9086a4f4f5025d8797c92efd"
-          actual="$(shasum -a 256 punctual-source.tar.xz | awk '{print $1}')"
-          echo "Source archive SHA-256: ${actual}"
-          test "${actual}" = "${expected}"
+          source_expected="17402d1468c1bb9d06fe6cfbdabacc14c64e99cd9086a4f4f5025d8797c92efd"
+          source_actual="$(shasum -a 256 punctual-source.tar.xz | awk '{print $1}')"
+          echo "Source archive SHA-256: ${source_actual}"
+          test "${source_actual}" = "${source_expected}"
 
           mkdir -p work
           tar -xJf punctual-source.tar.xz -C work
@@ -65,44 +65,44 @@ jobs:
               ("payloads/punctual-macos-arm64/overlay-scripts.tar.xz.b64", "overlay-scripts.tar.xz"),
               ("payloads/punctual-macos-arm64/overlay-app.tar.xz.b64", "overlay-app.tar.xz"),
               ("payloads/punctual-macos-arm64/overlay-product-polish.tar.xz.b64", "overlay-product-polish.tar.xz"),
+              ("payloads/punctual-macos-arm64/overlay-new-tab-alpha4.tar.xz.b64", "overlay-new-tab-alpha4.tar.xz"),
           ]
           for source, target in payloads:
               encoded = b"".join(Path(source).read_bytes().split())
               Path(target).write_bytes(base64.b64decode(encoded, validate=True))
           PY
 
-          scripts_expected="8578bb9c595ffc5fcf944311754dfb383e952dbd306fb7783d30dc841c6c8f7d"
-          scripts_actual="$(shasum -a 256 overlay-scripts.tar.xz | awk '{print $1}')"
-          echo "Scripts overlay SHA-256: ${scripts_actual}"
-          test "${scripts_actual}" = "${scripts_expected}"
+          check_hash() {
+            local file="$1"
+            local expected="$2"
+            local actual
+            actual="$(shasum -a 256 "${file}" | awk '{print $1}')"
+            echo "${file} SHA-256: ${actual}"
+            test "${actual}" = "${expected}"
+          }
 
-          app_expected="2493959afffb3a7637506c027d970dd2e2af4f03a72e17b0a2f410f9d9fb784f"
-          app_actual="$(shasum -a 256 overlay-app.tar.xz | awk '{print $1}')"
-          echo "Compatibility overlay SHA-256: ${app_actual}"
-          test "${app_actual}" = "${app_expected}"
-
-          polish_expected="e184f9538dc81c764291f1ef212e71c3f0a4d9595290ffa6837381d28883a16b"
-          polish_actual="$(shasum -a 256 overlay-product-polish.tar.xz | awk '{print $1}')"
-          echo "Product-polish overlay SHA-256: ${polish_actual}"
-          test "${polish_actual}" = "${polish_expected}"
+          check_hash overlay-scripts.tar.xz 8578bb9c595ffc5fcf944311754dfb383e952dbd306fb7783d30dc841c6c8f7d
+          check_hash overlay-app.tar.xz 2493959afffb3a7637506c027d970dd2e2af4f03a72e17b0a2f410f9d9fb784f
+          check_hash overlay-product-polish.tar.xz e184f9538dc81c764291f1ef212e71c3f0a4d9595290ffa6837381d28883a16b
+          check_hash overlay-new-tab-alpha4.tar.xz f22d8cac6ececbfe54a5c8221ad595b688f09fa6467aebba6e5d991aaa903f85
 
           tar -xJf overlay-scripts.tar.xz -C work/punctual-click
           tar -xJf overlay-app.tar.xz -C work/punctual-click
           tar -xJf overlay-product-polish.tar.xz -C work/punctual-click
+          tar -xJf overlay-new-tab-alpha4.tar.xz -C work/punctual-click
 
-          test -f work/punctual-click/scripts/detect_buttons.js
-          test -f work/punctual-click/scripts/highlight_button.js
-          test -f work/punctual-click/scripts/probe_target.js
-          grep -q 'version = "0.1.0-alpha.3"' work/punctual-click/Cargo.toml
-          grep -q 'overflow_y_scrollbar' work/punctual-click/crates/punctual-app/src/dashboard.rs
-          grep -q 'ClipboardItem::new_string' work/punctual-click/crates/punctual-app/src/dashboard.rs
-          grep -q 'window_min_size' work/punctual-click/crates/punctual-app/src/main.rs
+          grep -q 'version = "0.1.0-alpha.4"' work/punctual-click/Cargo.toml
+          grep -q 'existing_target_keys' work/punctual-click/crates/punctual-browser/src/chromium.rs
+          grep -q 'self.browser.pages().await' work/punctual-click/crates/punctual-browser/src/chromium.rs
+          grep -q 'DirectNew' work/punctual-click/crates/punctual-browser/src/chromium.rs
+          grep -q 'verify_completion(page, &dispatch' work/punctual-click/crates/punctual-engine/src/worker.rs
 
-      - name: Run source compatibility checks
+      - name: Run source checks
         working-directory: work/punctual-click
         shell: bash
         run: |
           set -euo pipefail
+          python3 scripts/rust-delimiter-check.py
           node --check scripts/detect_buttons.js
           node --check scripts/highlight_button.js
           node --check scripts/probe_target.js
@@ -123,10 +123,21 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             work/punctual-click/target
-          key: macos-arm64-punctual-alpha3-${{ hashFiles('build/punctual-macos-arm64/chunks/**', 'payloads/punctual-macos-arm64/**') }}
+          key: macos-arm64-punctual-alpha4-${{ hashFiles('build/punctual-macos-arm64/chunks/**', 'payloads/punctual-macos-arm64/**') }}
           restore-keys: |
+            macos-arm64-punctual-alpha4-
             macos-arm64-punctual-alpha3-
             macos-arm64-punctual-
+
+      - name: Test browser and engine crates
+        working-directory: work/punctual-click
+        env:
+          CARGO_TERM_COLOR: never
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p punctual-browser --features cdp
+          cargo test -p punctual-engine
 
       - name: Compile Punctual release binary
         working-directory: work/punctual-click
@@ -152,7 +163,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Punctual-alpha3-cargo-build-log
+          name: Punctual-alpha4-cargo-build-log
           path: dist/cargo-build.log
           if-no-files-found: warn
           retention-days: 1
@@ -166,7 +177,7 @@ jobs:
           MACOS="${CONTENTS}/MacOS"
           RESOURCES="${CONTENTS}/Resources"
 
-          rm -rf "${APP}" dist/dmg-root dist/Punctual-0.1.0-alpha.3-macos-arm64.dmg dist/Punctual-0.1.0-alpha.3-macos-arm64.dmg.sha256
+          rm -rf "${APP}" dist/dmg-root dist/Punctual-0.1.0-alpha.4-macos-arm64.dmg dist/Punctual-0.1.0-alpha.4-macos-arm64.dmg.sha256
           mkdir -p "${MACOS}" "${RESOURCES}"
           cp work/punctual-click/target/release/punctual-app "${MACOS}/Punctual"
           chmod 755 "${MACOS}/Punctual"
@@ -191,9 +202,9 @@ jobs:
             <key>CFBundlePackageType</key>
             <string>APPL</string>
             <key>CFBundleShortVersionString</key>
-            <string>0.1.0-alpha.3</string>
+            <string>0.1.0-alpha.4</string>
             <key>CFBundleVersion</key>
-            <string>3</string>
+            <string>4</string>
             <key>LSArchitecturePriority</key>
             <array>
               <string>arm64</string>
@@ -217,21 +228,22 @@ jobs:
           echo "Mach-O architectures: ${archs}"
           test "${archs}" = "arm64"
           otool -L "${MACOS}/Punctual"
-          defaults read "$(pwd)/${CONTENTS}/Info" CFBundleShortVersionString
+          version="$(defaults read "$(pwd)/${CONTENTS}/Info" CFBundleShortVersionString)"
+          test "${version}" = "0.1.0-alpha.4"
 
       - name: Build and verify DMG
         shell: bash
         run: |
           set -euo pipefail
           DMG_ROOT="dist/dmg-root"
-          DMG="dist/Punctual-0.1.0-alpha.3-macos-arm64.dmg"
+          DMG="dist/Punctual-0.1.0-alpha.4-macos-arm64.dmg"
 
           mkdir -p "${DMG_ROOT}"
           cp -R "dist/Punctual.app" "${DMG_ROOT}/Punctual.app"
           ln -s /Applications "${DMG_ROOT}/Applications"
 
           hdiutil create \
-            -volname "Punctual 0.1.0-alpha.3" \
+            -volname "Punctual 0.1.0-alpha.4" \
             -srcfolder "${DMG_ROOT}" \
             -ov \
             -format UDZO \
@@ -244,9 +256,9 @@ jobs:
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Punctual-0.1.0-alpha.3-macos-arm64
+          name: Punctual-0.1.0-alpha.4-macos-arm64
           path: |
-            dist/Punctual-0.1.0-alpha.3-macos-arm64.dmg
-            dist/Punctual-0.1.0-alpha.3-macos-arm64.dmg.sha256
+            dist/Punctual-0.1.0-alpha.4-macos-arm64.dmg
+            dist/Punctual-0.1.0-alpha.4-macos-arm64.dmg.sha256
           if-no-files-found: error
           retention-days: 1
