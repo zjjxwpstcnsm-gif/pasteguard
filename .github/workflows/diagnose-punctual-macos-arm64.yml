@@ -1,0 +1,95 @@
+name: Diagnose Punctual macOS ARM64
+
+on:
+  push:
+    branches:
+      - punctual-macos-arm64-build-20260817
+    paths:
+      - ".github/workflows/diagnose-punctual-macos-arm64.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: punctual-macos-arm64-diagnostics-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Cargo check on native ARM64
+    runs-on: macos-15
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Confirm ARM64 and reconstruct sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "arm64"
+          cat build/punctual-macos-arm64/chunks/part-* > punctual-source.b64
+          python3 - <<'PY'
+          import base64
+          from pathlib import Path
+          Path("punctual-source.tar.xz").write_bytes(
+              base64.b64decode(Path("punctual-source.b64").read_bytes(), validate=True)
+          )
+          Path("overlay-scripts.tar.xz").write_bytes(
+              base64.b64decode(
+                  Path("payloads/punctual-macos-arm64/overlay-scripts.tar.xz.b64").read_bytes(),
+                  validate=True,
+              )
+          )
+          PY
+          test "$(shasum -a 256 punctual-source.tar.xz | awk '{print $1}')" = "17402d1468c1bb9d06fe6cfbdabacc14c64e99cd9086a4f4f5025d8797c92efd"
+          test "$(shasum -a 256 overlay-scripts.tar.xz | awk '{print $1}')" = "8578bb9c595ffc5fcf944311754dfb383e952dbd306fb7783d30dc841c6c8f7d"
+          mkdir -p work
+          tar -xJf punctual-source.tar.xz -C work
+          tar -xJf overlay-scripts.tar.xz -C work/punctual-click
+          if [[ -d build/punctual-macos-arm64/overlay ]]; then
+            rsync -a build/punctual-macos-arm64/overlay/ work/punctual-click/
+          fi
+
+      - name: Install Rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Restore Cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            work/punctual-click/target
+          key: macos-arm64-punctual-${{ hashFiles('build/punctual-macos-arm64/chunks/**', 'payloads/punctual-macos-arm64/**') }}
+          restore-keys: |
+            macos-arm64-punctual-
+
+      - name: Run cargo check and preserve diagnostics
+        working-directory: work/punctual-click
+        env:
+          CARGO_TERM_COLOR: never
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/diagnostics"
+          set +e
+          cargo check -p punctual-app 2>&1 | tee "$GITHUB_WORKSPACE/diagnostics/cargo-check.log"
+          status=${PIPESTATUS[0]}
+          set -e
+          echo "${status}" > "$GITHUB_WORKSPACE/diagnostics/exit-code.txt"
+          exit "${status}"
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Punctual-cargo-check-diagnostics
+          path: diagnostics/
+          if-no-files-found: error
+          retention-days: 1
