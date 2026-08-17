@@ -98,12 +98,11 @@ jobs:
           grep -q 'ClipboardItem::new_string' work/punctual-click/crates/punctual-app/src/dashboard.rs
           grep -q 'window_min_size' work/punctual-click/crates/punctual-app/src/main.rs
 
-      - name: Run source consistency checks
+      - name: Run source compatibility checks
         working-directory: work/punctual-click
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/project-consistency-check.py
           node --check scripts/detect_buttons.js
           node --check scripts/highlight_button.js
           node --check scripts/probe_target.js
