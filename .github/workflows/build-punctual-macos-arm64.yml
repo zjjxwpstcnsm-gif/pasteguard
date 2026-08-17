@@ -101,15 +101,31 @@ jobs:
       - name: Compile Punctual release binary
         working-directory: work/punctual-click
         env:
-          CARGO_TERM_COLOR: always
+          CARGO_TERM_COLOR: never
           CARGO_INCREMENTAL: "1"
           CARGO_PROFILE_RELEASE_LTO: "false"
           CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
         shell: bash
         run: |
-          set -euo pipefail
-          cargo build --release -p punctual-app
+          set -uo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          set +e
+          cargo build --release -p punctual-app 2>&1 | tee "$GITHUB_WORKSPACE/dist/cargo-build.log"
+          build_status=${PIPESTATUS[0]}
+          set -e
+          if [[ "${build_status}" -ne 0 ]]; then
+            exit "${build_status}"
+          fi
           test -x target/release/punctual-app
+
+      - name: Upload Cargo build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Punctual-cargo-build-log
+          path: dist/cargo-build.log
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Assemble ad-hoc signed app bundle
         shell: bash
@@ -120,7 +136,7 @@ jobs:
           MACOS="${CONTENTS}/MacOS"
           RESOURCES="${CONTENTS}/Resources"
 
-          rm -rf dist
+          rm -rf "${APP}" "dist/dmg-root" "dist/Punctual-macos-arm64.dmg" "dist/Punctual-macos-arm64.dmg.sha256"
           mkdir -p "${MACOS}" "${RESOURCES}"
           cp work/punctual-click/target/release/punctual-app "${MACOS}/Punctual"
           chmod 755 "${MACOS}/Punctual"
