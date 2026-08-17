@@ -61,6 +61,23 @@ jobs:
             rsync -a build/punctual-macos-arm64/overlay/ work/punctual-click/
           fi
 
+          python3 - <<'PY'
+          import base64
+          from pathlib import Path
+
+          encoded = Path("payloads/punctual-macos-arm64/overlay-scripts.tar.xz.b64").read_bytes()
+          archive = base64.b64decode(encoded, validate=True)
+          Path("overlay-scripts.tar.xz").write_bytes(archive)
+          PY
+          overlay_expected="8578bb9c595ffc5fcf944311754dfb383e952dbd306fb7783d30dc841c6c8f7d"
+          overlay_actual="$(shasum -a 256 overlay-scripts.tar.xz | awk '{print $1}')"
+          echo "Overlay SHA-256: ${overlay_actual}"
+          test "${overlay_actual}" = "${overlay_expected}"
+          tar -xJf overlay-scripts.tar.xz -C work/punctual-click
+          test -f work/punctual-click/scripts/detect_buttons.js
+          test -f work/punctual-click/scripts/highlight_button.js
+          test -f work/punctual-click/scripts/probe_target.js
+
       - name: Install stable Rust toolchain
         shell: bash
         run: |
@@ -70,10 +87,24 @@ jobs:
           rustc --version --verbose
           cargo --version
 
+      - name: Restore Cargo build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            work/punctual-click/target
+          key: macos-arm64-punctual-${{ hashFiles('build/punctual-macos-arm64/chunks/**', 'payloads/punctual-macos-arm64/**') }}
+          restore-keys: |
+            macos-arm64-punctual-
+
       - name: Compile Punctual release binary
         working-directory: work/punctual-click
         env:
           CARGO_TERM_COLOR: always
+          CARGO_INCREMENTAL: "1"
+          CARGO_PROFILE_RELEASE_LTO: "false"
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
         shell: bash
         run: |
           set -euo pipefail
