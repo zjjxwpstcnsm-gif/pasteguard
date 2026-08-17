@@ -67,7 +67,7 @@ jobs:
               ("payloads/punctual-macos-arm64/overlay-product-polish.tar.xz.b64", "overlay-product-polish.tar.xz"),
           ]
           for source, target in payloads:
-              encoded = Path(source).read_bytes()
+              encoded = b"".join(Path(source).read_bytes().split())
               Path(target).write_bytes(base64.b64decode(encoded, validate=True))
           PY
 
@@ -156,7 +156,7 @@ jobs:
         with:
           name: Punctual-alpha3-cargo-build-log
           path: dist/cargo-build.log
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 1
 
       - name: Assemble and verify ad-hoc signed app bundle
