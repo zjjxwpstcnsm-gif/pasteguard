@@ -1,0 +1,39 @@
+{
+  "name": "pasteguard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A local-first browser tool that removes likely secrets and personal data before text is shared.",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/build.mjs",
+    "build:portable": "node scripts/build-portable.mjs",
+    "preview": "node scripts/serve.mjs dist",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node scripts/test.mjs",
+    "check": "npm run typecheck && npm run test && npm run build && npm run build:portable"
+  },
+  "keywords": [
+    "redaction",
+    "privacy",
+    "secrets",
+    "sanitizer",
+    "logs",
+    "local-first"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zjjxwpstcnsm-gif/pasteguard.git"
+  },
+  "homepage": "https://zjjxwpstcnsm-gif.github.io/pasteguard/",
+  "bugs": {
+    "url": "https://github.com/zjjxwpstcnsm-gif/pasteguard/issues"
+  }
+}

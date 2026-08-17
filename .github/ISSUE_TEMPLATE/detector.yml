@@ -1,0 +1,52 @@
+name: Detector accuracy report
+about: Report a false positive or false negative using synthetic data
+labels: ['detector']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use synthetic values only. Rotate any real credential that was exposed before reporting it.
+  - type: dropdown
+    id: behavior
+    attributes:
+      label: Behavior
+      options:
+        - False negative — a synthetic sensitive value was missed
+        - False positive — ordinary text was redacted
+    validations:
+      required: true
+  - type: input
+    id: preset
+    attributes:
+      label: Protection profile
+      placeholder: Balanced, Secrets only, Public issue, or Strict
+    validations:
+      required: true
+  - type: textarea
+    id: input
+    attributes:
+      label: Minimal synthetic input
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected output
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual output
+      render: text
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I confirm every value above is synthetic and non-sensitive.
+          required: true

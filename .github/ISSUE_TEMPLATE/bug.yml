@@ -1,0 +1,37 @@
+name: Bug report
+about: Report a UI, build, or general behavior problem
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never paste real credentials, production logs, or personal data. Use a minimal synthetic example.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the behavior and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include synthetic input and exact steps.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and version
+      placeholder: Firefox 142, Chrome 140, Safari 19…
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I confirm this report contains no real secret or personal data.
+          required: true

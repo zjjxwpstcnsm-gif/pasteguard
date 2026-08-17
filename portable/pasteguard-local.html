@@ -1,0 +1,2646 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="PasteGuard removes secrets, personal data, local paths, and invisible characters before you share text. Everything runs in your browser."
+    />
+    <meta name="theme-color" content="#f3efe6" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <style>
+:root {
+  color-scheme: light;
+  --canvas: #f3efe6;
+  --canvas-deep: #ebe4d7;
+  --surface: rgba(255, 253, 248, 0.88);
+  --surface-solid: #fffdf8;
+  --surface-muted: #f8f4ec;
+  --ink: #1d211d;
+  --ink-soft: #5e645d;
+  --ink-faint: #858b83;
+  --line: rgba(42, 49, 43, 0.13);
+  --line-strong: rgba(42, 49, 43, 0.22);
+  --brand: #17684f;
+  --brand-dark: #10523e;
+  --brand-soft: #dcece3;
+  --brand-faint: #edf6f0;
+  --critical: #aa342c;
+  --critical-soft: #f8dfda;
+  --high: #b9601b;
+  --high-soft: #fae8d6;
+  --medium: #806216;
+  --medium-soft: #f4ebcb;
+  --low: #486076;
+  --low-soft: #e2eaf0;
+  --clear: #187255;
+  --shadow-sm: 0 1px 2px rgba(28, 32, 28, 0.05), 0 8px 24px rgba(28, 32, 28, 0.04);
+  --shadow-lg: 0 24px 70px rgba(28, 32, 28, 0.18);
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  background: var(--canvas);
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--sans);
+  background:
+    radial-gradient(circle at 12% 4%, rgba(255, 255, 255, 0.96), transparent 26rem),
+    radial-gradient(circle at 92% 16%, rgba(205, 228, 214, 0.7), transparent 28rem),
+    linear-gradient(180deg, var(--canvas) 0%, #f8f5ef 46%, var(--canvas) 100%);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+textarea,
+input {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+button:focus-visible,
+textarea:focus-visible,
+input:focus-visible,
+a:focus-visible {
+  outline: 3px solid rgba(23, 104, 79, 0.25);
+  outline-offset: 2px;
+}
+
+::selection {
+  color: var(--ink);
+  background: #c8e2d2;
+}
+
+.page-shell {
+  width: min(1520px, 100%);
+  margin: 0 auto;
+  padding: 0 28px 44px;
+}
+
+.site-header {
+  position: sticky;
+  z-index: 30;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 74px;
+  padding: 12px 0;
+  border-bottom: 1px solid transparent;
+  background: rgba(243, 239, 230, 0.79);
+  backdrop-filter: blur(18px);
+}
+
+.site-header::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 1px;
+  content: "";
+  background: linear-gradient(90deg, transparent, var(--line), transparent);
+}
+
+.brand {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.brand-mark {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border: 1px solid rgba(23, 104, 79, 0.26);
+  border-radius: 13px;
+  background: linear-gradient(145deg, #ffffff, var(--brand-soft));
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.8), var(--shadow-sm);
+}
+
+.brand-mark svg {
+  width: 24px;
+  height: 24px;
+  overflow: visible;
+  fill: rgba(23, 104, 79, 0.13);
+  stroke: var(--brand);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.1;
+}
+
+.brand > span:last-child {
+  display: flex;
+  gap: 7px;
+  align-items: baseline;
+}
+
+.brand strong {
+  font-size: 17px;
+  letter-spacing: -0.02em;
+}
+
+.brand small {
+  padding: 3px 7px;
+  color: var(--brand-dark);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  background: var(--brand-soft);
+}
+
+.header-actions,
+.editor-actions,
+.summary-chips {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.privacy-pill {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  color: var(--brand-dark);
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid rgba(23, 104, 79, 0.16);
+  border-radius: 999px;
+  background: rgba(237, 246, 240, 0.8);
+}
+
+.privacy-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #2d9f73;
+  box-shadow: 0 0 0 4px rgba(45, 159, 115, 0.12);
+}
+
+.button,
+.text-button,
+.icon-button,
+.preset-button {
+  border: 0;
+  cursor: pointer;
+}
+
+.button {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 15px;
+  font-size: 13px;
+  font-weight: 750;
+  border-radius: 11px;
+  transition: transform 150ms ease, background 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+}
+
+.button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
+.button-primary {
+  color: white;
+  border: 1px solid var(--brand);
+  background: linear-gradient(180deg, #21775c, var(--brand));
+  box-shadow: 0 7px 20px rgba(23, 104, 79, 0.2), inset 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.button-primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #267f62, var(--brand-dark));
+  box-shadow: 0 9px 24px rgba(23, 104, 79, 0.25), inset 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.button-secondary {
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.button-secondary:hover:not(:disabled),
+.button-quiet:hover:not(:disabled) {
+  background: white;
+}
+
+.button-quiet {
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.38);
+}
+
+.count-badge {
+  display: inline-grid;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  place-items: center;
+  color: var(--brand-dark);
+  font-size: 11px;
+  border-radius: 999px;
+  background: var(--brand-soft);
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr);
+  gap: 44px;
+  align-items: end;
+  padding: 74px 0 42px;
+}
+
+.eyebrow {
+  margin: 0 0 9px;
+  color: var(--brand);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.hero h1 {
+  max-width: 860px;
+  margin: 0;
+  font-size: clamp(43px, 5.2vw, 74px);
+  font-weight: 730;
+  line-height: 0.98;
+  letter-spacing: -0.055em;
+}
+
+.hero-description {
+  max-width: 760px;
+  margin: 24px 0 0;
+  color: var(--ink-soft);
+  font-size: clamp(16px, 1.5vw, 20px);
+  line-height: 1.65;
+}
+
+.trust-card {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 20px;
+  border: 1px solid rgba(23, 104, 79, 0.17);
+  border-radius: var(--radius-md);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.82), rgba(230, 241, 233, 0.82));
+  box-shadow: var(--shadow-sm);
+}
+
+.trust-icon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  color: white;
+  font-weight: 800;
+  border-radius: 50%;
+  background: var(--brand);
+}
+
+.trust-card strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 14px;
+}
+
+.trust-card p {
+  margin: 6px 0 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.control-strip {
+  display: flex;
+  gap: 28px;
+  align-items: end;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding: 0 2px;
+}
+
+.control-label {
+  display: block;
+  margin-bottom: 9px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.preset-list {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.5);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.8);
+}
+
+.preset-button {
+  min-height: 34px;
+  padding: 0 13px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 750;
+  border-radius: 9px;
+  background: transparent;
+  transition: color 150ms ease, background 150ms ease, box-shadow 150ms ease;
+}
+
+.preset-button:hover {
+  color: var(--ink);
+}
+
+.preset-button[aria-pressed="true"] {
+  color: var(--brand-dark);
+  background: var(--surface-solid);
+  box-shadow: 0 1px 3px rgba(28, 32, 28, 0.12);
+}
+
+.preset-description {
+  max-width: 520px;
+  margin: 0 0 5px;
+  color: var(--ink-faint);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: right;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.editor-card {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(12px);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.editor-card:focus-within {
+  border-color: rgba(23, 104, 79, 0.34);
+  box-shadow: 0 0 0 4px rgba(23, 104, 79, 0.06), var(--shadow-sm);
+}
+
+.editor-card.is-dragging {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 4px rgba(23, 104, 79, 0.1), var(--shadow-sm);
+}
+
+.editor-header {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 78px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.editor-header h2 {
+  margin: 3px 0 0;
+  font-size: 15px;
+  letter-spacing: -0.015em;
+}
+
+.editor-kicker {
+  color: var(--ink-faint);
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.text-button {
+  padding: 5px 3px;
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 750;
+  background: transparent;
+}
+
+.text-button:hover {
+  color: var(--brand-dark);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.danger-text {
+  color: var(--critical);
+}
+
+.editor-body {
+  position: relative;
+}
+
+.editor-body textarea {
+  display: block;
+  width: 100%;
+  height: clamp(340px, 43vh, 540px);
+  margin: 0;
+  padding: 22px;
+  overflow: auto;
+  color: #252a25;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.68;
+  tab-size: 2;
+  resize: vertical;
+  border: 0;
+  outline: 0;
+  background:
+    linear-gradient(rgba(35, 42, 35, 0.025) 1px, transparent 1px) 0 0 / 100% 22px,
+    rgba(255, 255, 255, 0.52);
+  caret-color: var(--brand);
+}
+
+.result-card textarea {
+  background:
+    linear-gradient(rgba(23, 104, 79, 0.026) 1px, transparent 1px) 0 0 / 100% 22px,
+    rgba(244, 249, 245, 0.68);
+}
+
+.editor-body textarea::placeholder {
+  color: #a1a69f;
+}
+
+.editor-footer {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 43px;
+  padding: 10px 18px;
+  color: var(--ink-faint);
+  font-size: 11px;
+  border-top: 1px solid var(--line);
+}
+
+.status-neutral {
+  color: var(--ink-faint);
+}
+
+.status-clear {
+  color: var(--clear);
+  font-weight: 750;
+}
+
+.status-found {
+  color: var(--high);
+  font-weight: 750;
+}
+
+.status-alert {
+  color: var(--critical);
+  font-weight: 800;
+}
+
+.drop-hint {
+  position: absolute;
+  inset: 14px;
+  display: grid;
+  pointer-events: none;
+  place-items: center;
+  color: var(--brand-dark);
+  font-size: 16px;
+  font-weight: 800;
+  border: 2px dashed rgba(23, 104, 79, 0.45);
+  border-radius: 15px;
+  background: rgba(237, 246, 240, 0.92);
+  opacity: 0;
+  transform: scale(0.98);
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+
+.drop-hint.visible {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.findings-section,
+.how-it-works {
+  margin-top: 48px;
+}
+
+.section-heading {
+  display: flex;
+  gap: 24px;
+  align-items: end;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.section-heading h2 {
+  margin: 0;
+  font-size: 27px;
+  letter-spacing: -0.035em;
+}
+
+.summary-chips {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.summary-chip,
+.severity-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  text-transform: capitalize;
+  border-radius: 999px;
+}
+
+.summary-chip {
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 11px;
+  border: 1px solid transparent;
+}
+
+.summary-neutral {
+  color: var(--ink-soft);
+  border-color: var(--line);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.severity-critical {
+  color: var(--critical);
+  background: var(--critical-soft);
+}
+
+.severity-high {
+  color: var(--high);
+  background: var(--high-soft);
+}
+
+.severity-medium {
+  color: var(--medium);
+  background: var(--medium-soft);
+}
+
+.severity-low {
+  color: var(--low);
+  background: var(--low-soft);
+}
+
+.findings-list {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 253, 248, 0.76);
+  box-shadow: var(--shadow-sm);
+}
+
+.finding-row {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.finding-row:last-child {
+  border-bottom: 0;
+}
+
+.finding-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  font-size: 14px;
+  font-weight: 900;
+  border-radius: 10px;
+}
+
+.finding-main {
+  min-width: 0;
+}
+
+.finding-topline {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.finding-topline h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.finding-topline > span {
+  color: var(--ink-faint);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.finding-main > p {
+  margin: 5px 0 9px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.finding-details {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  color: var(--ink-faint);
+}
+
+.finding-details code {
+  max-width: 46%;
+  padding: 4px 7px;
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-family: var(--mono);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.finding-details code:last-child {
+  color: var(--brand-dark);
+  border-color: rgba(23, 104, 79, 0.17);
+  background: var(--brand-faint);
+}
+
+.finding-meta {
+  display: flex;
+  gap: 8px;
+  align-items: end;
+  flex-direction: column;
+}
+
+.severity-badge {
+  min-height: 22px;
+  padding: 0 8px;
+  font-size: 9px;
+  letter-spacing: 0.035em;
+}
+
+.confidence-label {
+  color: var(--ink-faint);
+  font-size: 9px;
+  text-transform: capitalize;
+}
+
+.findings-remainder {
+  margin: 0;
+  padding: 14px 20px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  text-align: center;
+  background: var(--surface-muted);
+}
+
+.empty-state {
+  display: flex;
+  min-height: 210px;
+  padding: 36px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  text-align: center;
+}
+
+.empty-icon {
+  display: grid;
+  width: 45px;
+  height: 45px;
+  margin-bottom: 12px;
+  place-items: center;
+  color: var(--brand);
+  font-size: 21px;
+  border: 1px solid rgba(23, 104, 79, 0.16);
+  border-radius: 15px;
+  background: var(--brand-faint);
+}
+
+.empty-state h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.empty-state p {
+  max-width: 480px;
+  margin: 7px 0 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.review-warning {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+  padding: 0 4px;
+  color: var(--ink-faint);
+  font-size: 11px;
+}
+
+.review-warning strong {
+  color: var(--ink-soft);
+}
+
+.how-it-works {
+  padding-top: 26px;
+  border-top: 1px solid var(--line);
+}
+
+.compact-heading {
+  margin-bottom: 20px;
+}
+
+.steps-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.steps-grid article {
+  min-height: 170px;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: rgba(255, 253, 248, 0.58);
+}
+
+.steps-grid article > span {
+  color: var(--brand);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.steps-grid h3 {
+  margin: 25px 0 7px;
+  font-size: 15px;
+}
+
+.steps-grid p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.site-footer {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 58px;
+  padding: 22px 2px 0;
+  color: var(--ink-faint);
+  font-size: 11px;
+  border-top: 1px solid var(--line);
+}
+
+.site-footer p {
+  margin: 0;
+}
+
+.site-footer strong {
+  color: var(--ink-soft);
+}
+
+.rules-dialog {
+  width: min(760px, calc(100vw - 30px));
+  max-height: min(88vh, 860px);
+  padding: 0;
+  overflow: hidden;
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-radius: 22px;
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lg);
+}
+
+.rules-dialog::backdrop {
+  background: rgba(29, 33, 29, 0.48);
+  backdrop-filter: blur(4px);
+}
+
+.dialog-shell {
+  display: grid;
+  max-height: min(88vh, 860px);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.dialog-header,
+.dialog-footer {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 22px;
+}
+
+.dialog-header {
+  border-bottom: 1px solid var(--line);
+}
+
+.dialog-header h2 {
+  margin: 0;
+  font-size: 24px;
+  letter-spacing: -0.035em;
+}
+
+.dialog-header p:last-child {
+  margin: 7px 0 0;
+  color: var(--ink-soft);
+  font-size: 11px;
+}
+
+.icon-button {
+  display: grid;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  color: var(--ink-soft);
+  font-size: 24px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface-muted);
+}
+
+.icon-button:hover {
+  color: var(--ink);
+  background: white;
+}
+
+.rules-content {
+  padding: 2px 22px 20px;
+  overflow-y: auto;
+}
+
+.rule-group {
+  padding: 22px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.rule-group:last-child {
+  border-bottom: 0;
+}
+
+.rule-group-header {
+  display: flex;
+  gap: 20px;
+  align-items: start;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.rule-group-header h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.rule-group-header p {
+  margin: 5px 0 0;
+  color: var(--ink-faint);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.rule-list {
+  display: grid;
+  gap: 7px;
+}
+
+.rule-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 62px;
+  padding: 10px 12px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: var(--surface-muted);
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+.rule-row:hover {
+  border-color: var(--line);
+  background: white;
+}
+
+.rule-row input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.switch-visual {
+  position: relative;
+  width: 36px;
+  height: 22px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: #deddd7;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+
+.switch-visual::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  content: "";
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 1px 3px rgba(28, 32, 28, 0.24);
+  transition: transform 150ms ease;
+}
+
+.rule-row input:checked + .switch-visual {
+  border-color: var(--brand);
+  background: var(--brand);
+}
+
+.rule-row input:checked + .switch-visual::after {
+  transform: translateX(14px);
+}
+
+.rule-row input:focus-visible + .switch-visual {
+  outline: 3px solid rgba(23, 104, 79, 0.2);
+  outline-offset: 2px;
+}
+
+.rule-copy {
+  display: block;
+  min-width: 0;
+}
+
+.rule-title,
+.rule-description {
+  display: block;
+}
+
+.rule-title {
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.rule-description {
+  margin-top: 4px;
+  color: var(--ink-faint);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.dialog-footer {
+  border-top: 1px solid var(--line);
+  background: var(--surface-muted);
+}
+
+.toast {
+  position: fixed;
+  z-index: 80;
+  right: 22px;
+  bottom: 22px;
+  max-width: min(360px, calc(100vw - 44px));
+  padding: 12px 16px;
+  pointer-events: none;
+  color: white;
+  font-size: 12px;
+  font-weight: 750;
+  border-radius: 11px;
+  background: #28322b;
+  box-shadow: 0 10px 30px rgba(28, 32, 28, 0.24);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+
+.toast.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+@media (max-width: 980px) {
+  .page-shell {
+    padding-right: 20px;
+    padding-left: 20px;
+  }
+
+  .hero {
+    grid-template-columns: 1fr;
+    gap: 28px;
+    padding-top: 54px;
+  }
+
+  .trust-card {
+    max-width: 600px;
+  }
+
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .editor-body textarea {
+    height: 360px;
+  }
+
+  .control-strip {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .preset-description {
+    max-width: 680px;
+    text-align: left;
+  }
+}
+
+@media (max-width: 720px) {
+  .page-shell {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .site-header {
+    min-height: 66px;
+  }
+
+  .privacy-pill {
+    display: none;
+  }
+
+  .hero {
+    padding: 45px 2px 34px;
+  }
+
+  .hero h1 {
+    font-size: clamp(39px, 12vw, 58px);
+  }
+
+  .hero-description {
+    font-size: 16px;
+  }
+
+  .preset-list {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .preset-button {
+    width: 100%;
+  }
+
+  .editor-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .editor-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .result-card .editor-actions .button {
+    flex: 1;
+  }
+
+  .editor-body textarea {
+    height: 320px;
+    padding: 17px;
+    font-size: 12px;
+  }
+
+  .section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .summary-chips {
+    justify-content: flex-start;
+  }
+
+  .finding-row {
+    grid-template-columns: 30px minmax(0, 1fr);
+    padding: 16px;
+  }
+
+  .finding-icon {
+    width: 28px;
+    height: 28px;
+  }
+
+  .finding-meta {
+    grid-column: 2;
+    align-items: flex-start;
+    flex-direction: row;
+  }
+
+  .finding-topline {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .review-warning {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .steps-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .steps-grid article {
+    min-height: 145px;
+  }
+
+  .site-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .rule-row {
+    grid-template-columns: 38px minmax(0, 1fr);
+  }
+
+  .rule-row .severity-badge {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .dialog-header {
+    align-items: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+    </style>
+    <title>PasteGuard — Make text safe before you share it</title>
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="site-header">
+        <a class="brand" href="#top" aria-label="PasteGuard home">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" role="img">
+              <path d="M16 2.8 27 7v8.1c0 7.4-4.5 12.1-11 14.1C9.5 27.2 5 22.5 5 15.1V7l11-4.2Z" />
+              <path d="m10.7 16.1 3.3 3.2 7.4-7.5" />
+            </svg>
+          </span>
+          <span>
+            <strong>PasteGuard</strong>
+            <small>Local</small>
+          </span>
+        </a>
+        <div class="header-actions">
+          <span class="privacy-pill">
+            <span class="privacy-dot" aria-hidden="true"></span>
+            Offline single-file processing
+          </span>
+          <button class="button button-quiet" id="open-rules" type="button">
+            Rules
+            <span class="count-badge" id="enabled-rule-count">0</span>
+          </button>
+        </div>
+      </header>
+
+      <main id="top">
+        <section class="hero" aria-labelledby="hero-title">
+          <div class="hero-copy">
+            <p class="eyebrow">Local-first text redaction</p>
+            <h1 id="hero-title">Make text safe before you share it.</h1>
+            <p class="hero-description">
+              Paste logs, configs, stack traces, or notes. PasteGuard replaces likely secrets and
+              personal details with stable placeholders—without sending your text anywhere.
+            </p>
+          </div>
+          <div class="trust-card" aria-label="Privacy guarantees">
+            <div class="trust-icon" aria-hidden="true">✓</div>
+            <div>
+              <strong>No upload. No account. No analytics.</strong>
+              <p>The network policy allows same-origin app files only. Your pasted content is never stored.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="control-strip" aria-label="Sanitization presets">
+          <div>
+            <span class="control-label">Protection profile</span>
+            <div class="preset-list" id="preset-list"></div>
+          </div>
+          <p class="preset-description" id="preset-description"></p>
+        </section>
+
+        <section class="workspace" aria-label="Text sanitization workspace">
+          <article class="editor-card source-card" id="source-card">
+            <header class="editor-header">
+              <div>
+                <span class="editor-kicker">Original</span>
+                <h2>Text to review</h2>
+              </div>
+              <div class="editor-actions">
+                <input
+                  class="visually-hidden"
+                  id="file-input"
+                  type="file"
+                  accept=".txt,.log,.md,.json,.jsonl,.yaml,.yml,.env,.csv,.xml,text/plain,application/json"
+                />
+                <button class="text-button" id="open-file" type="button">Open file</button>
+                <button class="text-button" id="load-sample" type="button">Try sample</button>
+                <button class="text-button danger-text" id="clear-input" type="button">Clear</button>
+              </div>
+            </header>
+            <div class="editor-body">
+              <textarea
+                id="source-input"
+                aria-label="Original text"
+                spellcheck="false"
+                placeholder="Paste a log, configuration, stack trace, URL, or support message…"
+              ></textarea>
+              <div class="drop-hint" id="drop-hint">Drop a text file here</div>
+            </div>
+            <footer class="editor-footer">
+              <span id="source-count">0 characters</span>
+              <span>Nothing leaves this tab</span>
+            </footer>
+          </article>
+
+          <article class="editor-card result-card">
+            <header class="editor-header">
+              <div>
+                <span class="editor-kicker">Sanitized</span>
+                <h2>Safe-to-review output</h2>
+              </div>
+              <div class="editor-actions">
+                <button class="button button-secondary" id="download-output" type="button" disabled>
+                  Download
+                </button>
+                <button class="button button-primary" id="copy-output" type="button" disabled>
+                  Copy safe text
+                </button>
+              </div>
+            </header>
+            <div class="editor-body">
+              <textarea
+                id="output-text"
+                aria-label="Sanitized output"
+                spellcheck="false"
+                placeholder="Sanitized text will appear here…"
+              ></textarea>
+            </div>
+            <footer class="editor-footer">
+              <span id="output-count">0 characters</span>
+              <span id="result-status" class="status-neutral" aria-live="polite">Paste text to begin</span>
+            </footer>
+          </article>
+        </section>
+
+        <section class="findings-section" aria-labelledby="findings-title">
+          <header class="section-heading">
+            <div>
+              <p class="eyebrow">Review before sharing</p>
+              <h2 id="findings-title">Findings</h2>
+            </div>
+            <div class="summary-chips" id="summary-chips" aria-label="Finding summary"></div>
+          </header>
+
+          <div class="findings-list" id="findings-list">
+            <div class="empty-state">
+              <span class="empty-icon" aria-hidden="true">⌁</span>
+              <h3>No text yet</h3>
+              <p>Paste content above or load the sample to see how redaction works.</p>
+            </div>
+          </div>
+
+          <div class="review-warning">
+            <strong>Pattern-based protection is not a guarantee.</strong>
+            <span>Always review the sanitized output before posting confidential material publicly.</span>
+          </div>
+        </section>
+
+        <section class="how-it-works" id="how-it-works" aria-labelledby="how-title">
+          <div class="section-heading compact-heading">
+            <div>
+              <p class="eyebrow">Designed to stay small</p>
+              <h2 id="how-title">How it works</h2>
+            </div>
+          </div>
+          <div class="steps-grid">
+            <article>
+              <span>01</span>
+              <h3>Detect locally</h3>
+              <p>Deterministic rules inspect the text inside your browser. No model or remote API is involved.</p>
+            </article>
+            <article>
+              <span>02</span>
+              <h3>Replace consistently</h3>
+              <p>The same value always becomes the same placeholder, preserving useful relationships in logs.</p>
+            </article>
+            <article>
+              <span>03</span>
+              <h3>Review explicitly</h3>
+              <p>Every replacement is listed with its rule, severity, and source location before you copy.</p>
+            </article>
+          </div>
+        </section>
+      </main>
+
+      <footer class="site-footer">
+        <p><strong>PasteGuard</strong> · Local-first · MIT licensed</p>
+        <p>Built without runtime dependencies. Text is processed in memory and never persisted.</p>
+      </footer>
+    </div>
+
+    <dialog class="rules-dialog" id="rules-dialog" aria-labelledby="rules-title">
+      <form method="dialog" class="dialog-shell">
+        <header class="dialog-header">
+          <div>
+            <p class="eyebrow">Customize protection</p>
+            <h2 id="rules-title">Detection rules</h2>
+            <p>Rule settings are local to this tab. Pasted text is never saved.</p>
+          </div>
+          <button class="icon-button" value="cancel" aria-label="Close rule settings">×</button>
+        </header>
+        <div class="rules-content" id="rules-content"></div>
+        <footer class="dialog-footer">
+          <button class="button button-quiet" id="reset-rules" type="button">Reset to Balanced</button>
+          <button class="button button-primary" value="default">Done</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script>
+(() => {
+'use strict';
+const APP_NAME = 'PasteGuard';
+const APP_TAGLINE = 'Make text safe before you share it.';
+const APP_VERSION = '0.1.0';
+// End bundled module: config.js
+
+function passesLuhn(value) {
+    const digits = value.replace(/\D/g, '');
+    if (digits.length < 13 || digits.length > 19 || /^(\d)\1+$/.test(digits)) {
+        return false;
+    }
+    let sum = 0;
+    let doubleDigit = false;
+    for (let index = digits.length - 1; index >= 0; index -= 1) {
+        const character = digits[index];
+        if (character === undefined) {
+            return false;
+        }
+        let digit = Number(character);
+        if (doubleDigit) {
+            digit *= 2;
+            if (digit > 9) {
+                digit -= 9;
+            }
+        }
+        sum += digit;
+        doubleDigit = !doubleDigit;
+    }
+    return sum % 10 === 0;
+}
+// End bundled module: engine/luhn.js
+
+function withRequiredFlags(expression) {
+    const flags = new Set(expression.flags.split(''));
+    flags.add('g');
+    flags.add('d');
+    return new RegExp(expression.source, [...flags].join(''));
+}
+function detectNamedGroup(text, expression, options) {
+    const regex = withRequiredFlags(expression);
+    const group = options.group ?? 'value';
+    const detections = [];
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+        const range = match.indices?.groups?.[group];
+        if (!range) {
+            continue;
+        }
+        const [start, end] = range;
+        const value = text.slice(start, end);
+        if (!value) {
+            continue;
+        }
+        const detection = {
+            start,
+            end,
+            value,
+            kind: options.kind,
+        };
+        const canonicalValue = options.canonicalize?.(value);
+        if (canonicalValue !== undefined) {
+            detection.canonicalValue = canonicalValue;
+        }
+        if (options.fixedReplacement !== undefined) {
+            detection.fixedReplacement = options.fixedReplacement;
+        }
+        detections.push(detection);
+    }
+    return detections;
+}
+function detectWholeMatch(text, expression, kind, fixedReplacement) {
+    const regex = withRequiredFlags(expression);
+    const detections = [];
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+        const range = match.indices?.[0];
+        if (!range || !match[0]) {
+            continue;
+        }
+        const detection = {
+            start: range[0],
+            end: range[1],
+            value: match[0],
+            kind,
+        };
+        if (fixedReplacement !== undefined) {
+            detection.fixedReplacement = fixedReplacement;
+        }
+        detections.push(detection);
+    }
+    return detections;
+}
+function mergeDetections(...groups) {
+    return groups.flat();
+}
+// End bundled module: engine/detectors.js
+
+class PlaceholderRegistry {
+    values = new Map();
+    get(kind, value) {
+        const normalizedKind = normalizeKind(kind);
+        let valuesForKind = this.values.get(normalizedKind);
+        if (!valuesForKind) {
+            valuesForKind = new Map();
+            this.values.set(normalizedKind, valuesForKind);
+        }
+        let index = valuesForKind.get(value);
+        if (index === undefined) {
+            index = valuesForKind.size + 1;
+            valuesForKind.set(value, index);
+        }
+        return `<${normalizedKind}_${index}>`;
+    }
+}
+function normalizeKind(kind) {
+    return kind
+        .trim()
+        .replace(/[^a-zA-Z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .toUpperCase();
+}
+// End bundled module: engine/placeholders.js
+
+function stripMatchingQuotes(detection) {
+    const first = detection.value.at(0);
+    const last = detection.value.at(-1);
+    if ((first === '"' || first === "'") && last === first) {
+        if (detection.value.length <= 2) {
+            return null;
+        }
+        return {
+            ...detection,
+            start: detection.start + 1,
+            end: detection.end - 1,
+            value: detection.value.slice(1, -1),
+            canonicalValue: detection.value.slice(1, -1),
+        };
+    }
+    return detection;
+}
+function detectPrivateKeys(text) {
+    return detectWholeMatch(text, /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/g, 'PRIVATE_KEY');
+}
+function detectBearerTokens(text) {
+    return detectNamedGroup(text, /\bAuthorization\s*:\s*Bearer\s+(?<value>[A-Za-z0-9._~+/=-]{8,})/gi, { kind: 'BEARER_TOKEN' });
+}
+function detectCookieHeaders(text) {
+    return detectNamedGroup(text, /^(?:Cookie|Set-Cookie)\s*:\s*(?<value>[^\r\n]+)/gim, {
+        kind: 'COOKIE',
+    });
+}
+function detectJwtTokens(text) {
+    return detectNamedGroup(text, /\b(?<value>eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,})\b/g, { kind: 'JWT' });
+}
+function detectKnownAccessTokens(text) {
+    return mergeDetections(detectNamedGroup(text, /\b(?<value>github_pat_[A-Za-z0-9_]{20,255})\b/g, {
+        kind: 'ACCESS_TOKEN',
+    }), detectNamedGroup(text, /\b(?<value>gh[pousr]_[A-Za-z0-9]{20,255})\b/g, {
+        kind: 'ACCESS_TOKEN',
+    }), detectNamedGroup(text, /\b(?<value>(?:AKIA|ASIA)[A-Z0-9]{16})\b/g, {
+        kind: 'CLOUD_ACCESS_KEY',
+    }), detectNamedGroup(text, /\b(?<value>AIza[0-9A-Za-z_-]{30,})\b/g, {
+        kind: 'API_KEY',
+    }), detectNamedGroup(text, /\b(?<value>xox[baprs]-[0-9A-Za-z-]{12,})\b/g, {
+        kind: 'ACCESS_TOKEN',
+    }), detectNamedGroup(text, /\b(?<value>sk-[A-Za-z0-9_-]{16,})\b/g, {
+        kind: 'API_KEY',
+    }));
+}
+function detectSecretAssignments(text) {
+    const detections = detectNamedGroup(text, /["']?(?:api[_-]?key|secret(?:[_-]?key)?|client[_-]?secret|access[_-]?token|auth[_-]?token|password|passwd|pwd)["']?\s*(?:=|:)\s*(?<value>"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;#}\]]+)/gi, { kind: 'SECRET' });
+    return detections
+        .map(stripMatchingQuotes)
+        .filter((detection) => detection !== null)
+        .filter((detection) => !/^(?:null|none|undefined|false|true|changeme|example)$/i.test(detection.value));
+}
+function detectSensitiveUrlParameters(text) {
+    return detectNamedGroup(text, /[?&](?:access[_-]?token|token|api[_-]?key|password|passwd|secret|signature|sig|auth)=?(?<value>[^&#\s]*)/gi, { kind: 'URL_SECRET' }).filter((detection) => detection.value.length > 0);
+}
+function detectDatabasePasswords(text) {
+    return detectNamedGroup(text, /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|amqp|amqps):\/\/[^:\s/@]+:(?<value>[^@\s/]+)@/gi, { kind: 'DATABASE_PASSWORD' });
+}
+function detectEmails(text) {
+    return detectNamedGroup(text, /(?<value>[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?)+)/gi, {
+        kind: 'EMAIL',
+        canonicalize: (value) => value.toLowerCase(),
+    });
+}
+function detectPaymentCards(text) {
+    const regex = /\b(?:\d[ -]?){12,18}\d\b/g;
+    const detections = [];
+    for (const match of text.matchAll(regex)) {
+        const value = match[0];
+        const start = match.index;
+        if (start === undefined || !passesLuhn(value)) {
+            continue;
+        }
+        detections.push({
+            start,
+            end: start + value.length,
+            value,
+            canonicalValue: value.replace(/\D/g, ''),
+            kind: 'PAYMENT_CARD',
+        });
+    }
+    return detections;
+}
+function detectPhoneNumbers(text) {
+    const regex = /(?:\+\d{1,3}[\s().-]*)?(?:\(?\d{2,4}\)?[\s.-]*){2,5}\d{2,4}/g;
+    const detections = [];
+    for (const match of text.matchAll(regex)) {
+        const raw = match[0].trim();
+        const originalStart = match.index;
+        if (originalStart === undefined || raw.length === 0) {
+            continue;
+        }
+        const leadingTrim = match[0].length - match[0].trimStart().length;
+        const start = originalStart + leadingTrim;
+        const end = start + raw.length;
+        const before = text[start - 1] ?? '';
+        const after = text[end] ?? '';
+        const touchesIdentifier = /[A-Za-z0-9]/.test(before) || /[A-Za-z0-9]/.test(after);
+        const digits = raw.replace(/\D/g, '');
+        const hasPhoneShape = raw.startsWith('+') || /[()]/.test(raw) || (raw.match(/[ .-]/g)?.length ?? 0) >= 2;
+        const looksLikeDate = /^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$/.test(raw);
+        const looksLikeIp = /^(?:\d{1,3}\.){3}\d{1,3}$/.test(raw);
+        if (digits.length < 7 ||
+            digits.length > 15 ||
+            !hasPhoneShape ||
+            touchesIdentifier ||
+            looksLikeDate ||
+            looksLikeIp ||
+            passesLuhn(raw)) {
+            continue;
+        }
+        detections.push({
+            start,
+            end,
+            value: raw,
+            canonicalValue: digits,
+            kind: 'PHONE',
+            confidence: 'medium',
+        });
+    }
+    return detections;
+}
+function detectIpv4Addresses(text) {
+    const regex = /\b(?:\d{1,3}\.){3}\d{1,3}\b/g;
+    const detections = [];
+    for (const match of text.matchAll(regex)) {
+        const value = match[0];
+        const start = match.index;
+        if (start === undefined) {
+            continue;
+        }
+        const valid = value.split('.').every((part) => {
+            if (part.length > 1 && part.startsWith('0')) {
+                return false;
+            }
+            const number = Number(part);
+            return Number.isInteger(number) && number >= 0 && number <= 255;
+        });
+        if (valid) {
+            detections.push({
+                start,
+                end: start + value.length,
+                value,
+                kind: 'IP_ADDRESS',
+            });
+        }
+    }
+    return detections;
+}
+function detectMacAddresses(text) {
+    return detectNamedGroup(text, /\b(?<value>(?:[0-9A-F]{2}[:-]){5}[0-9A-F]{2})\b/gi, {
+        kind: 'MAC_ADDRESS',
+        canonicalize: (value) => value.toLowerCase().replace(/-/g, ':'),
+    });
+}
+function detectLocalUsernames(text) {
+    return mergeDetections(detectNamedGroup(text, /\/(?:Users|home)\/(?<value>[^/\s]+)(?=\/)/g, {
+        kind: 'LOCAL_USER',
+    }), detectNamedGroup(text, /\b[A-Za-z]:\\Users\\(?<value>[^\\\s]+)(?=\\)/g, {
+        kind: 'LOCAL_USER',
+        canonicalize: (value) => value.toLowerCase(),
+    }));
+}
+function detectUuids(text) {
+    return detectNamedGroup(text, /\b(?<value>[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\b/gi, {
+        kind: 'UUID',
+        canonicalize: (value) => value.toLowerCase(),
+    });
+}
+function detectIdentifierAssignments(text) {
+    const detections = detectNamedGroup(text, /["']?(?:user|account|customer|session|request|trace|device)[_-]?id["']?\s*(?:=|:)\s*(?<value>"[^"\r\n]*"|'[^'\r\n]*'|[A-Za-z0-9._:-]{4,})/gi, { kind: 'IDENTIFIER' });
+    return detections
+        .map(stripMatchingQuotes)
+        .filter((detection) => detection !== null)
+        .map((detection) => ({ ...detection, confidence: 'medium' }));
+}
+function detectAnsiSequences(text) {
+    return detectWholeMatch(text, /\u001B(?:\[[0-?]*[ -/]*[@-~]|[@-_])/g, 'ANSI_SEQUENCE', '');
+}
+function detectZeroWidthCharacters(text) {
+    return detectWholeMatch(text, /[\u200B-\u200D\u2060\uFEFF]/g, 'ZERO_WIDTH_CHARACTER', '');
+}
+function detectBidirectionalControls(text) {
+    return detectWholeMatch(text, /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, 'BIDI_CONTROL', '');
+}
+const RULES = [
+    {
+        id: 'private-key',
+        label: 'Private keys',
+        description: 'PEM-encoded private key blocks.',
+        category: 'secrets',
+        severity: 'critical',
+        priority: 120,
+        enabledByDefault: true,
+        detect: detectPrivateKeys,
+    },
+    {
+        id: 'cookie-header',
+        label: 'Cookie headers',
+        description: 'Cookie and Set-Cookie header values.',
+        category: 'secrets',
+        severity: 'critical',
+        priority: 110,
+        enabledByDefault: true,
+        detect: detectCookieHeaders,
+    },
+    {
+        id: 'bearer-token',
+        label: 'Bearer tokens',
+        description: 'Authorization header bearer credentials.',
+        category: 'secrets',
+        severity: 'critical',
+        priority: 105,
+        enabledByDefault: true,
+        detect: detectBearerTokens,
+    },
+    {
+        id: 'database-password',
+        label: 'Database passwords',
+        description: 'Passwords embedded in common database connection URLs.',
+        category: 'secrets',
+        severity: 'critical',
+        priority: 100,
+        enabledByDefault: true,
+        detect: detectDatabasePasswords,
+    },
+    {
+        id: 'url-secret',
+        label: 'Sensitive URL parameters',
+        description: 'Tokens, keys, passwords, and signatures in URL query strings.',
+        category: 'secrets',
+        severity: 'critical',
+        priority: 96,
+        enabledByDefault: true,
+        detect: detectSensitiveUrlParameters,
+    },
+    {
+        id: 'secret-assignment',
+        label: 'Assigned secrets',
+        description: 'Password, API key, token, and secret values in configs or logs.',
+        category: 'secrets',
+        severity: 'critical',
+        priority: 92,
+        enabledByDefault: true,
+        detect: detectSecretAssignments,
+    },
+    {
+        id: 'known-access-token',
+        label: 'Known token formats',
+        description: 'Common API and access-token prefixes.',
+        category: 'secrets',
+        severity: 'critical',
+        priority: 88,
+        enabledByDefault: true,
+        detect: detectKnownAccessTokens,
+    },
+    {
+        id: 'jwt',
+        label: 'JSON Web Tokens',
+        description: 'JWT-like three-segment tokens.',
+        category: 'secrets',
+        severity: 'high',
+        priority: 84,
+        enabledByDefault: true,
+        detect: detectJwtTokens,
+    },
+    {
+        id: 'payment-card',
+        label: 'Payment card numbers',
+        description: '13–19 digit numbers that pass the Luhn checksum.',
+        category: 'personal',
+        severity: 'critical',
+        priority: 76,
+        enabledByDefault: true,
+        detect: detectPaymentCards,
+    },
+    {
+        id: 'email',
+        label: 'Email addresses',
+        description: 'Common email address formats.',
+        category: 'personal',
+        severity: 'high',
+        priority: 65,
+        enabledByDefault: true,
+        detect: detectEmails,
+    },
+    {
+        id: 'phone',
+        label: 'Phone numbers',
+        description: 'Phone-shaped international and local number patterns.',
+        category: 'personal',
+        severity: 'medium',
+        priority: 48,
+        enabledByDefault: true,
+        detect: detectPhoneNumbers,
+    },
+    {
+        id: 'ip-address',
+        label: 'IPv4 addresses',
+        description: 'Valid IPv4 addresses, including private network addresses.',
+        category: 'network',
+        severity: 'medium',
+        priority: 58,
+        enabledByDefault: true,
+        detect: detectIpv4Addresses,
+    },
+    {
+        id: 'mac-address',
+        label: 'MAC addresses',
+        description: 'Colon- or dash-separated hardware addresses.',
+        category: 'network',
+        severity: 'medium',
+        priority: 54,
+        enabledByDefault: true,
+        detect: detectMacAddresses,
+    },
+    {
+        id: 'local-user',
+        label: 'Local usernames',
+        description: 'Usernames exposed by macOS, Linux, and Windows home paths.',
+        category: 'device',
+        severity: 'medium',
+        priority: 52,
+        enabledByDefault: true,
+        detect: detectLocalUsernames,
+    },
+    {
+        id: 'identifier-assignment',
+        label: 'Assigned identifiers',
+        description: 'User, account, session, request, trace, and device IDs.',
+        category: 'identifiers',
+        severity: 'medium',
+        priority: 44,
+        enabledByDefault: false,
+        detect: detectIdentifierAssignments,
+    },
+    {
+        id: 'uuid',
+        label: 'UUIDs',
+        description: 'Standard UUID values that may identify users, devices, or requests.',
+        category: 'identifiers',
+        severity: 'low',
+        priority: 42,
+        enabledByDefault: false,
+        detect: detectUuids,
+    },
+    {
+        id: 'bidi-control',
+        label: 'Bidirectional controls',
+        description: 'Invisible direction-control characters that can disguise text.',
+        category: 'hygiene',
+        severity: 'high',
+        priority: 40,
+        enabledByDefault: true,
+        detect: detectBidirectionalControls,
+    },
+    {
+        id: 'zero-width',
+        label: 'Zero-width characters',
+        description: 'Invisible spacing characters that can hide inside copied text.',
+        category: 'hygiene',
+        severity: 'medium',
+        priority: 36,
+        enabledByDefault: true,
+        detect: detectZeroWidthCharacters,
+    },
+    {
+        id: 'ansi-sequence',
+        label: 'Terminal color codes',
+        description: 'ANSI escape sequences copied from terminal output.',
+        category: 'hygiene',
+        severity: 'low',
+        priority: 32,
+        enabledByDefault: true,
+        detect: detectAnsiSequences,
+    },
+];
+const RULE_BY_ID = new Map(RULES.map((rule) => [rule.id, rule]));
+// End bundled module: engine/rules.js
+
+const secretRuleIds = RULES.filter((rule) => rule.category === 'secrets').map((rule) => rule.id);
+const defaultRuleIds = RULES.filter((rule) => rule.enabledByDefault).map((rule) => rule.id);
+const publicIssueRuleIds = RULES.filter((rule) => rule.id !== 'phone').map((rule) => rule.id);
+const allRuleIds = RULES.map((rule) => rule.id);
+const PRESETS = [
+    {
+        id: 'balanced',
+        label: 'Balanced',
+        description: 'Secrets, common personal data, network details, paths, and hidden characters.',
+        ruleIds: defaultRuleIds,
+    },
+    {
+        id: 'secrets',
+        label: 'Secrets only',
+        description: 'Credentials and token-like values with the lowest false-positive surface.',
+        ruleIds: secretRuleIds,
+    },
+    {
+        id: 'public-issue',
+        label: 'Public issue',
+        description: 'A stricter profile for GitHub issues, forums, and public support threads.',
+        ruleIds: publicIssueRuleIds,
+    },
+    {
+        id: 'strict',
+        label: 'Strict',
+        description: 'Every built-in detector, including generic identifiers and UUIDs.',
+        ruleIds: allRuleIds,
+    },
+];
+const DEFAULT_PRESET_ID = 'balanced';
+// End bundled module: engine/presets.js
+
+function sanitize(text, options = {}) {
+    const enabledRuleIds = new Set(options.enabledRuleIds ?? RULES.filter((rule) => rule.enabledByDefault).map((rule) => rule.id));
+    if (text.length === 0) {
+        return emptyResult([...enabledRuleIds]);
+    }
+    const candidates = collectCandidates(text, enabledRuleIds);
+    const selected = selectNonOverlapping(candidates);
+    const registry = new PlaceholderRegistry();
+    const lineStarts = createLineStarts(text);
+    const replacements = selected
+        .sort((left, right) => left.start - right.start || left.end - right.end)
+        .map((candidate) => {
+        const canonicalValue = candidate.canonicalValue ?? candidate.value;
+        const replacement = candidate.fixedReplacement ?? registry.get(candidate.kind, canonicalValue);
+        const location = locate(lineStarts, candidate.start);
+        const finding = {
+            id: `${candidate.rule.id}:${candidate.start}:${candidate.end}`,
+            ruleId: candidate.rule.id,
+            label: candidate.rule.label,
+            description: candidate.rule.description,
+            category: candidate.rule.category,
+            severity: candidate.rule.severity,
+            confidence: candidate.confidence ?? 'high',
+            start: candidate.start,
+            end: candidate.end,
+            line: location.line,
+            column: location.column,
+            originalPreview: previewValue(candidate),
+            replacement,
+        };
+        return { candidate, replacement, finding };
+    });
+    const output = [];
+    let cursor = 0;
+    for (const item of replacements) {
+        output.push(text.slice(cursor, item.candidate.start));
+        output.push(item.replacement);
+        cursor = item.candidate.end;
+    }
+    output.push(text.slice(cursor));
+    const findings = replacements.map((item) => item.finding);
+    return {
+        text: output.join(''),
+        findings,
+        enabledRuleIds: RULES.filter((rule) => enabledRuleIds.has(rule.id)).map((rule) => rule.id),
+        summary: {
+            total: findings.length,
+            critical: countSeverity(findings, 'critical'),
+            high: countSeverity(findings, 'high'),
+            medium: countSeverity(findings, 'medium'),
+            low: countSeverity(findings, 'low'),
+            changedCharacters: selected.reduce((total, candidate) => total + (candidate.end - candidate.start), 0),
+        },
+    };
+}
+function emptyResult(enabledRuleIds) {
+    return {
+        text: '',
+        findings: [],
+        enabledRuleIds,
+        summary: {
+            total: 0,
+            critical: 0,
+            high: 0,
+            medium: 0,
+            low: 0,
+            changedCharacters: 0,
+        },
+    };
+}
+function collectCandidates(text, enabledRuleIds) {
+    const candidates = [];
+    for (const rule of RULES) {
+        if (!enabledRuleIds.has(rule.id)) {
+            continue;
+        }
+        let detections;
+        try {
+            detections = rule.detect(text);
+        }
+        catch (error) {
+            console.warn(`PasteGuard rule failed: ${rule.id}`, error);
+            continue;
+        }
+        for (const detection of detections) {
+            if (!Number.isInteger(detection.start) ||
+                !Number.isInteger(detection.end) ||
+                detection.start < 0 ||
+                detection.end > text.length ||
+                detection.end <= detection.start) {
+                continue;
+            }
+            candidates.push({ ...detection, rule });
+        }
+    }
+    return candidates;
+}
+function selectNonOverlapping(candidates) {
+    const ranked = [...candidates].sort((left, right) => {
+        const priority = right.rule.priority - left.rule.priority;
+        if (priority !== 0) {
+            return priority;
+        }
+        const length = right.end - right.start - (left.end - left.start);
+        if (length !== 0) {
+            return length;
+        }
+        return left.start - right.start;
+    });
+    const selected = [];
+    for (const candidate of ranked) {
+        const overlaps = selected.some((existing) => candidate.start < existing.end && existing.start < candidate.end);
+        if (!overlaps) {
+            selected.push(candidate);
+        }
+    }
+    return selected;
+}
+function countSeverity(findings, severity) {
+    return findings.filter((finding) => finding.severity === severity).length;
+}
+function createLineStarts(text) {
+    const starts = [0];
+    for (let index = 0; index < text.length; index += 1) {
+        if (text[index] === '\n') {
+            starts.push(index + 1);
+        }
+    }
+    return starts;
+}
+function locate(lineStarts, offset) {
+    let low = 0;
+    let high = lineStarts.length - 1;
+    while (low <= high) {
+        const middle = Math.floor((low + high) / 2);
+        const current = lineStarts[middle];
+        const next = lineStarts[middle + 1] ?? Number.POSITIVE_INFINITY;
+        if (current === undefined) {
+            break;
+        }
+        if (offset < current) {
+            high = middle - 1;
+        }
+        else if (offset >= next) {
+            low = middle + 1;
+        }
+        else {
+            return { line: middle + 1, column: offset - current + 1 };
+        }
+    }
+    return { line: 1, column: offset + 1 };
+}
+function previewValue(candidate) {
+    const value = candidate.value;
+    if (candidate.fixedReplacement === '') {
+        return [...value]
+            .map((character) => `U+${character.codePointAt(0)?.toString(16).toUpperCase().padStart(4, '0')}`)
+            .join(', ');
+    }
+    if (candidate.rule.category === 'secrets') {
+        return `${value.length} character${value.length === 1 ? '' : 's'}`;
+    }
+    if (candidate.rule.id === 'email') {
+        const [local, domain] = value.split('@');
+        if (local && domain) {
+            return `${local.slice(0, 1)}•••@${domain}`;
+        }
+    }
+    const compact = value.replace(/\s+/g, ' ');
+    if (compact.length <= 8) {
+        return '•'.repeat(Math.max(4, compact.length));
+    }
+    return `${compact.slice(0, 3)}…${compact.slice(-2)} (${compact.length} chars)`;
+}
+// End bundled module: engine/sanitize.js
+
+const SAMPLE_TEXT = `POST https://api.example.com/v1/orders?token=demo_super_secret_token_123456
+Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.demo_signature_value
+Cookie: session=abc123xyz; csrf=secret-cookie-value
+
+api_key = "sk-demo-4D8fK2mN9qR7sT1vX6yZ"
+password: correct-horse-battery-staple
+DATABASE_URL=postgresql://demo_user:db-password-123@10.24.5.18:5432/orders
+
+Customer: maya.chen@example.com
+Phone: +1 (415) 555-0137
+Payment card: 4242 4242 4242 4242
+Local file: /Users/maya/work/acme/error.log
+Device: 00:1A:2B:3C:4D:5E
+requestId: 7a9e6679-7425-40de-944b-e07fc1f90ae7
+
+\u001b[31mERROR\u001b[0m Login failed for maya.chen@example.com from 10.24.5.18
+Invisible character: safe\u200Btext`;
+const CATEGORY_META = {
+    secrets: {
+        label: 'Secrets and credentials',
+        description: 'Keys, tokens, passwords, cookies, and credential-bearing URLs.',
+    },
+    personal: {
+        label: 'Personal data',
+        description: 'Email addresses, phone-shaped values, and payment card numbers.',
+    },
+    network: {
+        label: 'Network details',
+        description: 'IP and hardware addresses that may expose internal infrastructure.',
+    },
+    device: {
+        label: 'Local device details',
+        description: 'Usernames exposed by local filesystem paths.',
+    },
+    identifiers: {
+        label: 'Identifiers',
+        description: 'Generic IDs and UUIDs. Disabled in Balanced mode to reduce false positives.',
+    },
+    hygiene: {
+        label: 'Text hygiene',
+        description: 'Invisible Unicode controls and terminal formatting sequences.',
+    },
+};
+const sourceInput = getElement('source-input');
+const outputText = getElement('output-text');
+const sourceCount = getElement('source-count');
+const outputCount = getElement('output-count');
+const resultStatus = getElement('result-status');
+const findingsList = getElement('findings-list');
+const summaryChips = getElement('summary-chips');
+const presetList = getElement('preset-list');
+const presetDescription = getElement('preset-description');
+const enabledRuleCount = getElement('enabled-rule-count');
+const rulesDialog = getElement('rules-dialog');
+const rulesContent = getElement('rules-content');
+const toast = getElement('toast');
+const sourceCard = getElement('source-card');
+const dropHint = getElement('drop-hint');
+const fileInput = getElement('file-input');
+const copyButton = getElement('copy-output');
+const downloadButton = getElement('download-output');
+let activePresetId = DEFAULT_PRESET_ID;
+let enabledRules = new Set(getPreset(DEFAULT_PRESET_ID).ruleIds);
+let currentResult = sanitize('', { enabledRuleIds: enabledRules });
+let scheduledFrame = 0;
+let toastTimer = 0;
+initialize();
+function initialize() {
+    document.title = `${APP_NAME} — Make text safe before you share it`;
+    renderPresets();
+    renderRules();
+    renderResult(currentResult);
+    bindEvents();
+    if (new URLSearchParams(window.location.search).get('demo') === '1') {
+        sourceInput.value = SAMPLE_TEXT;
+        runSanitize();
+    }
+}
+function bindEvents() {
+    sourceInput.addEventListener('input', scheduleSanitize);
+    outputText.addEventListener('input', updateOutputCount);
+    getElement('load-sample').addEventListener('click', () => {
+        sourceInput.value = SAMPLE_TEXT;
+        scheduleSanitize();
+        sourceInput.focus();
+        showToast('Synthetic sample loaded');
+    });
+    getElement('clear-input').addEventListener('click', () => {
+        sourceInput.value = '';
+        outputText.value = '';
+        scheduleSanitize();
+        sourceInput.focus();
+    });
+    getElement('open-rules').addEventListener('click', () => {
+        rulesDialog.showModal();
+    });
+    getElement('reset-rules').addEventListener('click', () => {
+        applyPreset(DEFAULT_PRESET_ID);
+        renderRules();
+        showToast('Balanced rules restored');
+    });
+    getElement('open-file').addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', async () => {
+        const file = fileInput.files?.[0];
+        if (file) {
+            await loadFile(file);
+        }
+        fileInput.value = '';
+    });
+    copyButton.addEventListener('click', copySafeText);
+    downloadButton.addEventListener('click', downloadSafeText);
+    sourceCard.addEventListener('dragenter', handleDragEnter);
+    sourceCard.addEventListener('dragover', handleDragEnter);
+    sourceCard.addEventListener('dragleave', handleDragLeave);
+    sourceCard.addEventListener('drop', handleDrop);
+    document.addEventListener('keydown', (event) => {
+        if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && outputText.value) {
+            event.preventDefault();
+            void copySafeText();
+        }
+    });
+}
+function renderPresets() {
+    presetList.replaceChildren();
+    for (const preset of PRESETS) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'preset-button';
+        button.textContent = preset.label;
+        button.dataset.presetId = preset.id;
+        button.setAttribute('aria-pressed', String(activePresetId === preset.id));
+        button.addEventListener('click', () => applyPreset(preset.id));
+        presetList.append(button);
+    }
+    updatePresetDescription();
+}
+function applyPreset(presetId) {
+    const preset = getPreset(presetId);
+    activePresetId = preset.id;
+    enabledRules = new Set(preset.ruleIds);
+    renderPresets();
+    renderRules();
+    scheduleSanitize();
+}
+function renderRules() {
+    rulesContent.replaceChildren();
+    const categories = Object.keys(CATEGORY_META);
+    for (const category of categories) {
+        const rules = RULES.filter((rule) => rule.category === category);
+        if (rules.length === 0) {
+            continue;
+        }
+        const group = document.createElement('section');
+        group.className = 'rule-group';
+        const header = document.createElement('div');
+        header.className = 'rule-group-header';
+        const titleWrap = document.createElement('div');
+        const title = document.createElement('h3');
+        title.textContent = CATEGORY_META[category].label;
+        const description = document.createElement('p');
+        description.textContent = CATEGORY_META[category].description;
+        titleWrap.append(title, description);
+        const toggleCategory = document.createElement('button');
+        toggleCategory.type = 'button';
+        toggleCategory.className = 'text-button';
+        const allEnabled = rules.every((rule) => enabledRules.has(rule.id));
+        toggleCategory.textContent = allEnabled ? 'Disable all' : 'Enable all';
+        toggleCategory.addEventListener('click', () => {
+            for (const rule of rules) {
+                if (allEnabled) {
+                    enabledRules.delete(rule.id);
+                }
+                else {
+                    enabledRules.add(rule.id);
+                }
+            }
+            markCustomPreset();
+            renderRules();
+            scheduleSanitize();
+        });
+        header.append(titleWrap, toggleCategory);
+        group.append(header);
+        const list = document.createElement('div');
+        list.className = 'rule-list';
+        for (const rule of rules) {
+            const label = document.createElement('label');
+            label.className = 'rule-row';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = enabledRules.has(rule.id);
+            checkbox.addEventListener('change', () => {
+                if (checkbox.checked) {
+                    enabledRules.add(rule.id);
+                }
+                else {
+                    enabledRules.delete(rule.id);
+                }
+                markCustomPreset();
+                updateEnabledRuleCount();
+                scheduleSanitize();
+            });
+            const switchVisual = document.createElement('span');
+            switchVisual.className = 'switch-visual';
+            switchVisual.setAttribute('aria-hidden', 'true');
+            const text = document.createElement('span');
+            text.className = 'rule-copy';
+            const rowTitle = document.createElement('span');
+            rowTitle.className = 'rule-title';
+            rowTitle.textContent = rule.label;
+            const rowDescription = document.createElement('span');
+            rowDescription.className = 'rule-description';
+            rowDescription.textContent = rule.description;
+            text.append(rowTitle, rowDescription);
+            const severity = document.createElement('span');
+            severity.className = `severity-badge severity-${rule.severity}`;
+            severity.textContent = rule.severity;
+            label.append(checkbox, switchVisual, text, severity);
+            list.append(label);
+        }
+        group.append(list);
+        rulesContent.append(group);
+    }
+    updateEnabledRuleCount();
+}
+function markCustomPreset() {
+    const matchedPreset = PRESETS.find((preset) => setsEqual(enabledRules, new Set(preset.ruleIds)));
+    activePresetId = matchedPreset?.id ?? 'custom';
+    renderPresets();
+}
+function updatePresetDescription() {
+    const preset = PRESETS.find((item) => item.id === activePresetId);
+    presetDescription.textContent =
+        preset?.description ?? 'Custom profile. Open Rules to inspect or change enabled detectors.';
+    updateEnabledRuleCount();
+}
+function updateEnabledRuleCount() {
+    enabledRuleCount.textContent = String(enabledRules.size);
+}
+function scheduleSanitize() {
+    window.cancelAnimationFrame(scheduledFrame);
+    scheduledFrame = window.requestAnimationFrame(runSanitize);
+}
+function runSanitize() {
+    currentResult = sanitize(sourceInput.value, { enabledRuleIds: enabledRules });
+    outputText.value = currentResult.text;
+    renderResult(currentResult);
+}
+function renderResult(result) {
+    sourceCount.textContent = formatCount(sourceInput.value.length, 'character');
+    updateOutputCount();
+    renderStatus(result);
+    renderSummary(result);
+    renderFindings(result.findings);
+    const hasOutput = outputText.value.length > 0;
+    copyButton.disabled = !hasOutput;
+    downloadButton.disabled = !hasOutput;
+}
+function updateOutputCount() {
+    outputCount.textContent = formatCount(outputText.value.length, 'character');
+    const hasOutput = outputText.value.length > 0;
+    copyButton.disabled = !hasOutput;
+    downloadButton.disabled = !hasOutput;
+}
+function renderStatus(result) {
+    resultStatus.className = '';
+    if (!sourceInput.value) {
+        resultStatus.textContent = 'Paste text to begin';
+        resultStatus.classList.add('status-neutral');
+        return;
+    }
+    if (result.summary.total === 0) {
+        resultStatus.textContent = 'No built-in patterns found';
+        resultStatus.classList.add('status-clear');
+        return;
+    }
+    resultStatus.textContent = `${formatCount(result.summary.total, 'finding')} replaced`;
+    resultStatus.classList.add(result.summary.critical > 0 ? 'status-alert' : 'status-found');
+}
+function renderSummary(result) {
+    summaryChips.replaceChildren();
+    if (result.summary.total === 0) {
+        const chip = document.createElement('span');
+        chip.className = 'summary-chip summary-neutral';
+        chip.textContent = '0 findings';
+        summaryChips.append(chip);
+        return;
+    }
+    const entries = [
+        ['critical', result.summary.critical],
+        ['high', result.summary.high],
+        ['medium', result.summary.medium],
+        ['low', result.summary.low],
+    ];
+    for (const [severity, count] of entries) {
+        if (count === 0) {
+            continue;
+        }
+        const chip = document.createElement('span');
+        chip.className = `summary-chip severity-${severity}`;
+        chip.textContent = `${count} ${severity}`;
+        summaryChips.append(chip);
+    }
+}
+function renderFindings(findings) {
+    findingsList.replaceChildren();
+    if (!sourceInput.value) {
+        findingsList.append(createEmptyState('⌁', 'No text yet', 'Paste content above or load the sample to see how redaction works.'));
+        return;
+    }
+    if (findings.length === 0) {
+        findingsList.append(createEmptyState('✓', 'No built-in patterns found', 'That is a useful signal, not a security guarantee. Review the text before sharing.'));
+        return;
+    }
+    const visibleFindings = findings.slice(0, 100);
+    for (const finding of visibleFindings) {
+        const row = document.createElement('article');
+        row.className = 'finding-row';
+        const icon = document.createElement('span');
+        icon.className = `finding-icon severity-${finding.severity}`;
+        icon.textContent = finding.severity === 'critical' ? '!' : finding.severity === 'high' ? '↑' : '•';
+        icon.setAttribute('aria-hidden', 'true');
+        const main = document.createElement('div');
+        main.className = 'finding-main';
+        const top = document.createElement('div');
+        top.className = 'finding-topline';
+        const title = document.createElement('h3');
+        title.textContent = finding.label;
+        const location = document.createElement('span');
+        location.textContent = `Line ${finding.line}, col ${finding.column}`;
+        top.append(title, location);
+        const description = document.createElement('p');
+        description.textContent = finding.description;
+        const details = document.createElement('div');
+        details.className = 'finding-details';
+        const original = document.createElement('code');
+        original.textContent = finding.originalPreview;
+        const arrow = document.createElement('span');
+        arrow.textContent = '→';
+        arrow.setAttribute('aria-hidden', 'true');
+        const replacement = document.createElement('code');
+        replacement.textContent = finding.replacement || '[removed]';
+        details.append(original, arrow, replacement);
+        main.append(top, description, details);
+        const metadata = document.createElement('div');
+        metadata.className = 'finding-meta';
+        const severity = document.createElement('span');
+        severity.className = `severity-badge severity-${finding.severity}`;
+        severity.textContent = finding.severity;
+        const confidence = document.createElement('span');
+        confidence.className = 'confidence-label';
+        confidence.textContent = `${finding.confidence} confidence`;
+        metadata.append(severity, confidence);
+        row.append(icon, main, metadata);
+        findingsList.append(row);
+    }
+    if (findings.length > visibleFindings.length) {
+        const remainder = document.createElement('p');
+        remainder.className = 'findings-remainder';
+        remainder.textContent = `${findings.length - visibleFindings.length} additional findings are hidden from this list. All replacements were still applied.`;
+        findingsList.append(remainder);
+    }
+}
+function createEmptyState(iconText, titleText, descriptionText) {
+    const state = document.createElement('div');
+    state.className = 'empty-state';
+    const icon = document.createElement('span');
+    icon.className = 'empty-icon';
+    icon.textContent = iconText;
+    icon.setAttribute('aria-hidden', 'true');
+    const title = document.createElement('h3');
+    title.textContent = titleText;
+    const description = document.createElement('p');
+    description.textContent = descriptionText;
+    state.append(icon, title, description);
+    return state;
+}
+async function copySafeText() {
+    if (!outputText.value) {
+        return;
+    }
+    try {
+        await navigator.clipboard.writeText(outputText.value);
+    }
+    catch {
+        outputText.select();
+        document.execCommand('copy');
+        outputText.setSelectionRange(0, 0);
+    }
+    showToast('Sanitized text copied');
+}
+function downloadSafeText() {
+    if (!outputText.value) {
+        return;
+    }
+    const blob = new Blob([outputText.value], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'pasteguard-output.txt';
+    anchor.click();
+    URL.revokeObjectURL(url);
+    showToast('Sanitized text downloaded');
+}
+async function loadFile(file) {
+    const maxBytes = 2 * 1024 * 1024;
+    if (file.size > maxBytes) {
+        showToast('File is larger than the 2 MB browser limit');
+        return;
+    }
+    try {
+        sourceInput.value = await file.text();
+        scheduleSanitize();
+        showToast(`${file.name} loaded locally`);
+    }
+    catch {
+        showToast('Could not read that file');
+    }
+}
+function handleDragEnter(event) {
+    event.preventDefault();
+    sourceCard.classList.add('is-dragging');
+    dropHint.classList.add('visible');
+}
+function handleDragLeave(event) {
+    if (event.relatedTarget instanceof Node && sourceCard.contains(event.relatedTarget)) {
+        return;
+    }
+    sourceCard.classList.remove('is-dragging');
+    dropHint.classList.remove('visible');
+}
+function handleDrop(event) {
+    event.preventDefault();
+    sourceCard.classList.remove('is-dragging');
+    dropHint.classList.remove('visible');
+    const file = event.dataTransfer?.files[0];
+    if (file) {
+        void loadFile(file);
+    }
+}
+function showToast(message) {
+    window.clearTimeout(toastTimer);
+    toast.textContent = message;
+    toast.classList.add('visible');
+    toastTimer = window.setTimeout(() => toast.classList.remove('visible'), 2200);
+}
+function registerServiceWorker() {
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            void navigator.serviceWorker.register('./sw.js').catch(() => {
+                // Offline support is optional; the sanitizer remains fully functional.
+            });
+        });
+    }
+}
+function getPreset(id) {
+    return PRESETS.find((preset) => preset.id === id) ?? PRESETS[0];
+}
+function formatCount(count, singular) {
+    return `${count.toLocaleString()} ${singular}${count === 1 ? '' : 's'}`;
+}
+function setsEqual(left, right) {
+    return left.size === right.size && [...left].every((value) => right.has(value));
+}
+function getElement(id) {
+    const element = document.getElementById(id);
+    if (!element) {
+        throw new Error(`Missing required element: #${id}`);
+    }
+    return element;
+}
+console.info(`${APP_NAME} ${APP_VERSION} ready. All text processing is local.`);
+// End bundled module: app.js
+})();
+
+    </script>
+  </body>
+</html>

@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="PasteGuard removes secrets, personal data, local paths, and invisible characters before you share text. Everything runs in your browser."
+    />
+    <meta name="theme-color" content="#f3efe6" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="stylesheet" href="./styles.css" />
+    <title>PasteGuard — Make text safe before you share it</title>
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="site-header">
+        <a class="brand" href="#top" aria-label="PasteGuard home">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" role="img">
+              <path d="M16 2.8 27 7v8.1c0 7.4-4.5 12.1-11 14.1C9.5 27.2 5 22.5 5 15.1V7l11-4.2Z" />
+              <path d="m10.7 16.1 3.3 3.2 7.4-7.5" />
+            </svg>
+          </span>
+          <span>
+            <strong>PasteGuard</strong>
+            <small>Local</small>
+          </span>
+        </a>
+        <div class="header-actions">
+          <span class="privacy-pill">
+            <span class="privacy-dot" aria-hidden="true"></span>
+            Browser-only processing
+          </span>
+          <button class="button button-quiet" id="open-rules" type="button">
+            Rules
+            <span class="count-badge" id="enabled-rule-count">0</span>
+          </button>
+        </div>
+      </header>
+
+      <main id="top">
+        <section class="hero" aria-labelledby="hero-title">
+          <div class="hero-copy">
+            <p class="eyebrow">Local-first text redaction</p>
+            <h1 id="hero-title">Make text safe before you share it.</h1>
+            <p class="hero-description">
+              Paste logs, configs, stack traces, or notes. PasteGuard replaces likely secrets and
+              personal details with stable placeholders—without sending your text anywhere.
+            </p>
+          </div>
+          <div class="trust-card" aria-label="Privacy guarantees">
+            <div class="trust-icon" aria-hidden="true">✓</div>
+            <div>
+              <strong>No upload. No account. No analytics.</strong>
+              <p>The network policy allows same-origin app files only. Your pasted content is never stored.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="control-strip" aria-label="Sanitization presets">
+          <div>
+            <span class="control-label">Protection profile</span>
+            <div class="preset-list" id="preset-list"></div>
+          </div>
+          <p class="preset-description" id="preset-description"></p>
+        </section>
+
+        <section class="workspace" aria-label="Text sanitization workspace">
+          <article class="editor-card source-card" id="source-card">
+            <header class="editor-header">
+              <div>
+                <span class="editor-kicker">Original</span>
+                <h2>Text to review</h2>
+              </div>
+              <div class="editor-actions">
+                <input
+                  class="visually-hidden"
+                  id="file-input"
+                  type="file"
+                  accept=".txt,.log,.md,.json,.jsonl,.yaml,.yml,.env,.csv,.xml,text/plain,application/json"
+                />
+                <button class="text-button" id="open-file" type="button">Open file</button>
+                <button class="text-button" id="load-sample" type="button">Try sample</button>
+                <button class="text-button danger-text" id="clear-input" type="button">Clear</button>
+              </div>
+            </header>
+            <div class="editor-body">
+              <textarea
+                id="source-input"
+                aria-label="Original text"
+                spellcheck="false"
+                placeholder="Paste a log, configuration, stack trace, URL, or support message…"
+              ></textarea>
+              <div class="drop-hint" id="drop-hint">Drop a text file here</div>
+            </div>
+            <footer class="editor-footer">
+              <span id="source-count">0 characters</span>
+              <span>Nothing leaves this tab</span>
+            </footer>
+          </article>
+
+          <article class="editor-card result-card">
+            <header class="editor-header">
+              <div>
+                <span class="editor-kicker">Sanitized</span>
+                <h2>Safe-to-review output</h2>
+              </div>
+              <div class="editor-actions">
+                <button class="button button-secondary" id="download-output" type="button" disabled>
+                  Download
+                </button>
+                <button class="button button-primary" id="copy-output" type="button" disabled>
+                  Copy safe text
+                </button>
+              </div>
+            </header>
+            <div class="editor-body">
+              <textarea
+                id="output-text"
+                aria-label="Sanitized output"
+                spellcheck="false"
+                placeholder="Sanitized text will appear here…"
+              ></textarea>
+            </div>
+            <footer class="editor-footer">
+              <span id="output-count">0 characters</span>
+              <span id="result-status" class="status-neutral" aria-live="polite">Paste text to begin</span>
+            </footer>
+          </article>
+        </section>
+
+        <section class="findings-section" aria-labelledby="findings-title">
+          <header class="section-heading">
+            <div>
+              <p class="eyebrow">Review before sharing</p>
+              <h2 id="findings-title">Findings</h2>
+            </div>
+            <div class="summary-chips" id="summary-chips" aria-label="Finding summary"></div>
+          </header>
+
+          <div class="findings-list" id="findings-list">
+            <div class="empty-state">
+              <span class="empty-icon" aria-hidden="true">⌁</span>
+              <h3>No text yet</h3>
+              <p>Paste content above or load the sample to see how redaction works.</p>
+            </div>
+          </div>
+
+          <div class="review-warning">
+            <strong>Pattern-based protection is not a guarantee.</strong>
+            <span>Always review the sanitized output before posting confidential material publicly.</span>
+          </div>
+        </section>
+
+        <section class="how-it-works" id="how-it-works" aria-labelledby="how-title">
+          <div class="section-heading compact-heading">
+            <div>
+              <p class="eyebrow">Designed to stay small</p>
+              <h2 id="how-title">How it works</h2>
+            </div>
+          </div>
+          <div class="steps-grid">
+            <article>
+              <span>01</span>
+              <h3>Detect locally</h3>
+              <p>Deterministic rules inspect the text inside your browser. No model or remote API is involved.</p>
+            </article>
+            <article>
+              <span>02</span>
+              <h3>Replace consistently</h3>
+              <p>The same value always becomes the same placeholder, preserving useful relationships in logs.</p>
+            </article>
+            <article>
+              <span>03</span>
+              <h3>Review explicitly</h3>
+              <p>Every replacement is listed with its rule, severity, and source location before you copy.</p>
+            </article>
+          </div>
+        </section>
+      </main>
+
+      <footer class="site-footer">
+        <p><strong>PasteGuard</strong> · Local-first · MIT licensed</p>
+        <p>Built without runtime dependencies. Text is processed in memory and never persisted.</p>
+      </footer>
+    </div>
+
+    <dialog class="rules-dialog" id="rules-dialog" aria-labelledby="rules-title">
+      <form method="dialog" class="dialog-shell">
+        <header class="dialog-header">
+          <div>
+            <p class="eyebrow">Customize protection</p>
+            <h2 id="rules-title">Detection rules</h2>
+            <p>Rule settings are local to this tab. Pasted text is never saved.</p>
+          </div>
+          <button class="icon-button" value="cancel" aria-label="Close rule settings">×</button>
+        </header>
+        <div class="rules-content" id="rules-content"></div>
+        <footer class="dialog-footer">
+          <button class="button button-quiet" id="reset-rules" type="button">Reset to Balanced</button>
+          <button class="button button-primary" value="default">Done</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

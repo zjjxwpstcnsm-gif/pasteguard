@@ -1,0 +1,18 @@
+{
+  "name": "PasteGuard",
+  "short_name": "PasteGuard",
+  "description": "Make logs, configs, and text safer to share without uploading them.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f3efe6",
+  "theme_color": "#f3efe6",
+  "icons": [
+    {
+      "src": "./favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
