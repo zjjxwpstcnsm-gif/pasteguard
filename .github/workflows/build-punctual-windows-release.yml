@@ -1,0 +1,242 @@
+name: Build Punctual 0.1.0-alpha.5 Windows Release
+
+on:
+  push:
+    branches:
+      - punctual-publish-staging-20260818
+    paths:
+      - ".github/workflows/build-punctual-windows-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Windows x64 installer and portable package
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install stable Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version --verbose
+          cargo --version
+
+      - name: Restore Cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            exports/source-tree/target
+          key: windows-x64-punctual-alpha5-release-${{ hashFiles('exports/source-tree/**/Cargo.toml', 'exports/source-tree/Cargo.lock') }}
+          restore-keys: |
+            windows-x64-punctual-alpha5-release-
+            windows-x64-punctual-
+
+      - name: Test browser discovery and compile release binary
+        working-directory: exports/source-tree
+        env:
+          CARGO_TERM_COLOR: never
+          CARGO_INCREMENTAL: "1"
+          CARGO_PROFILE_RELEASE_LTO: "false"
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+        run: |
+          cargo test -p punctual-browser --features cdp
+          cargo build --release -p punctual-app
+          if (-not (Test-Path target/release/punctual-app.exe)) {
+            throw "Punctual release executable was not produced"
+          }
+
+      - name: Download managed browser resources
+        run: |
+          $ErrorActionPreference = "Stop"
+          $runtime = Join-Path $env:GITHUB_WORKSPACE "dist/runtime"
+          New-Item -ItemType Directory -Force -Path $runtime | Out-Null
+
+          $chromeManifestUrl = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json"
+          $chromeManifest = Invoke-RestMethod -Uri $chromeManifestUrl
+          $stable = $chromeManifest.channels.Stable
+          $chromeDownload = $stable.downloads.chrome | Where-Object { $_.platform -eq "win64" } | Select-Object -First 1
+          if (-not $chromeDownload) { throw "Chrome for Testing win64 download was not found" }
+          $chromeZip = Join-Path $runtime "chrome-win64.zip"
+          Invoke-WebRequest -Uri $chromeDownload.url -OutFile $chromeZip
+          Expand-Archive -Path $chromeZip -DestinationPath (Join-Path $runtime "chrome") -Force
+          Set-Content -Path (Join-Path $runtime "chrome-version.txt") -Value $stable.version -NoNewline
+          $chromeExe = Join-Path $runtime "chrome/chrome-win64/chrome.exe"
+          if (-not (Test-Path $chromeExe)) { throw "Managed Chrome executable is missing" }
+
+          $geckoVersion = "0.37.1"
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/mozilla/geckodriver/releases/tags/v$geckoVersion"
+          $assetName = "geckodriver-v$geckoVersion-win64.zip"
+          $asset = $release.assets | Where-Object { $_.name -eq $assetName } | Select-Object -First 1
+          if (-not $asset) { throw "The expected geckodriver asset was not found" }
+          $geckoZip = Join-Path $runtime $assetName
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $geckoZip
+          if ($asset.digest -and $asset.digest.StartsWith("sha256:")) {
+            $expected = $asset.digest.Substring(7).ToLowerInvariant()
+            $actual = (Get-FileHash -Algorithm SHA256 $geckoZip).Hash.ToLowerInvariant()
+            if ($actual -ne $expected) { throw "geckodriver SHA-256 mismatch" }
+          }
+          Expand-Archive -Path $geckoZip -DestinationPath (Join-Path $runtime "gecko") -Force
+          $geckoExe = Join-Path $runtime "gecko/geckodriver.exe"
+          if (-not (Test-Path $geckoExe)) { throw "geckodriver.exe is missing" }
+
+          @{
+            chrome_version = $stable.version
+            chrome_download = $chromeDownload.url
+            geckodriver_version = $geckoVersion
+            geckodriver_asset = $assetName
+          } | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $runtime "runtime-versions.json")
+
+      - name: Assemble portable distribution
+        run: |
+          $ErrorActionPreference = "Stop"
+          $root = Join-Path $env:GITHUB_WORKSPACE "dist/Punctual-windows-x64"
+          $resources = Join-Path $root "resources"
+          Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path (Join-Path $resources "managed-browser"), (Join-Path $resources "bin") | Out-Null
+
+          Copy-Item "exports/source-tree/target/release/punctual-app.exe" (Join-Path $root "Punctual.exe")
+          Copy-Item -Recurse -Force "dist/runtime/chrome/chrome-win64" (Join-Path $resources "managed-browser/chrome-win64")
+          Copy-Item "dist/runtime/gecko/geckodriver.exe" (Join-Path $resources "bin/geckodriver.exe")
+          Copy-Item "dist/runtime/chrome-version.txt" (Join-Path $resources "managed-browser/version.txt")
+          Copy-Item "dist/runtime/runtime-versions.json" (Join-Path $resources "runtime-versions.json")
+
+          @'
+          Punctual 0.1.0-alpha.5
+
+          运行方式：双击 Punctual.exe。
+          本目录已经包含托管浏览器和 Firefox 驱动；系统安装了 Chrome 时仍会优先使用 Chrome。
+          应用会为自动化浏览器使用独立的用户数据目录，不读取浏览器默认配置目录。
+
+          本构建尚未使用 Windows 代码签名证书，Windows SmartScreen 可能显示未知发布者提示。
+          '@ | Set-Content -Encoding utf8 (Join-Path $root "README.txt")
+
+          $portableZip = Join-Path $env:GITHUB_WORKSPACE "dist/Punctual-0.1.0-alpha.5-windows-x64-portable.zip"
+          Remove-Item $portableZip -Force -ErrorAction SilentlyContinue
+          Compress-Archive -Path "$root/*" -DestinationPath $portableZip -CompressionLevel Optimal
+
+      - name: Build per-user Windows installer
+        run: |
+          $ErrorActionPreference = "Stop"
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+          }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup compiler was not found" }
+
+          $sourceRoot = (Resolve-Path "dist/Punctual-windows-x64").Path
+          $outputDir = (Resolve-Path "dist").Path
+          $iss = @"
+          #define MyAppName "Punctual"
+          #define MyAppVersion "0.1.0-alpha.5"
+          #define MyAppPublisher "Punctual"
+          #define MyAppExeName "Punctual.exe"
+
+          [Setup]
+          AppId={{A545F0B0-5389-47D5-A4B9-6A90B2C93E51}
+          AppName={#MyAppName}
+          AppVersion={#MyAppVersion}
+          AppPublisher={#MyAppPublisher}
+          DefaultDirName={localappdata}\Programs\Punctual
+          DefaultGroupName=Punctual
+          DisableProgramGroupPage=yes
+          PrivilegesRequired=lowest
+          OutputDir=$outputDir
+          OutputBaseFilename=Punctual-0.1.0-alpha.5-windows-x64-setup
+          Compression=lzma2/max
+          SolidCompression=yes
+          WizardStyle=modern
+          ArchitecturesAllowed=x64compatible
+          ArchitecturesInstallIn64BitMode=x64compatible
+          UninstallDisplayIcon={app}\{#MyAppExeName}
+          CloseApplications=yes
+          RestartApplications=no
+
+          [Languages]
+          Name: "english"; MessagesFile: "compiler:Default.isl"
+
+          [Tasks]
+          Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
+
+          [Files]
+          Source: "$sourceRoot\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+          [Icons]
+          Name: "{autoprograms}\Punctual"; Filename: "{app}\{#MyAppExeName}"
+          Name: "{autodesktop}\Punctual"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+
+          [Run]
+          Filename: "{app}\{#MyAppExeName}"; Description: "Launch Punctual"; Flags: nowait postinstall skipifsilent
+          "@
+          $issPath = Join-Path $env:GITHUB_WORKSPACE "dist/punctual.iss"
+          Set-Content -Path $issPath -Value $iss -Encoding utf8
+          & $iscc $issPath
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
+
+      - name: Verify packages and generate checksums
+        id: metadata
+        run: |
+          $ErrorActionPreference = "Stop"
+          $setup = "dist/Punctual-0.1.0-alpha.5-windows-x64-setup.exe"
+          $portable = "dist/Punctual-0.1.0-alpha.5-windows-x64-portable.zip"
+          foreach ($path in @($setup, $portable)) {
+            if (-not (Test-Path $path)) { throw "Missing release artifact: $path" }
+          }
+          $setupHash = (Get-FileHash -Algorithm SHA256 $setup).Hash.ToLowerInvariant()
+          $portableHash = (Get-FileHash -Algorithm SHA256 $portable).Hash.ToLowerInvariant()
+          @(
+            "$setupHash  Punctual-0.1.0-alpha.5-windows-x64-setup.exe",
+            "$portableHash  Punctual-0.1.0-alpha.5-windows-x64-portable.zip"
+          ) | Set-Content -Encoding ascii "dist/Punctual-0.1.0-alpha.5-windows-x64-SHA256SUMS.txt"
+
+          $setupSize = (Get-Item $setup).Length
+          $portableSize = (Get-Item $portable).Length
+          @{
+            version = "0.1.0-alpha.5"
+            platform = "windows-x64"
+            run_id = "${{ github.run_id }}"
+            artifact_name = "Punctual-0.1.0-alpha.5-windows-x64"
+            setup_sha256 = $setupHash
+            setup_bytes = $setupSize
+            portable_sha256 = $portableHash
+            portable_bytes = $portableSize
+          } | ConvertTo-Json | Set-Content -Encoding utf8 "dist/windows-build-manifest.json"
+
+      - name: Upload Windows release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Punctual-0.1.0-alpha.5-windows-x64
+          path: |
+            dist/Punctual-0.1.0-alpha.5-windows-x64-setup.exe
+            dist/Punctual-0.1.0-alpha.5-windows-x64-portable.zip
+            dist/Punctual-0.1.0-alpha.5-windows-x64-SHA256SUMS.txt
+            dist/windows-build-manifest.json
+          if-no-files-found: error
+          retention-days: 2
+          compression-level: 0
+
+      - name: Publish build manifest to staging branch
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path "exports/build-results/windows" | Out-Null
+          Copy-Item "dist/windows-build-manifest.json" "exports/build-results/windows/MANIFEST.json"
+          Copy-Item "dist/Punctual-0.1.0-alpha.5-windows-x64-SHA256SUMS.txt" "exports/build-results/windows/SHA256SUMS.txt"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add exports/build-results/windows
+          if (-not (git diff --cached --quiet)) {
+            git commit -m "build: record Punctual Windows artifacts [skip ci]"
+            git push
+          }
