@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   export:
@@ -17,6 +17,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Reconstruct verified source
         shell: bash
@@ -86,6 +88,23 @@ jobs:
           rm -rf work/punctual-click/target
           tar -C work -cJf Punctual-0.1.0-alpha.5-source.tar.xz punctual-click
           sha256sum Punctual-0.1.0-alpha.5-source.tar.xz > Punctual-0.1.0-alpha.5-source.tar.xz.sha256
+
+      - name: Commit source archive to staging branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p exports
+          cp Punctual-0.1.0-alpha.5-source.tar.xz exports/
+          cp Punctual-0.1.0-alpha.5-source.tar.xz.sha256 exports/
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add exports/Punctual-0.1.0-alpha.5-source.tar.xz exports/Punctual-0.1.0-alpha.5-source.tar.xz.sha256
+          if git diff --cached --quiet; then
+            echo "Source archive already committed"
+          else
+            git commit -m "build: export Punctual alpha.5 source [skip ci]"
+            git push
+          fi
 
       - name: Upload source archive
         uses: actions/upload-artifact@v4
