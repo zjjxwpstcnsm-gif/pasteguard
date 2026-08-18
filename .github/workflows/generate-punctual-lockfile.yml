@@ -1,0 +1,51 @@
+name: Generate Punctual Cargo.lock
+
+on:
+  push:
+    branches:
+      - punctual-publish-staging-20260818
+    paths:
+      - ".github/workflows/generate-punctual-lockfile.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  lockfile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install stable Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Generate and validate Cargo.lock
+        working-directory: exports/source-tree
+        run: |
+          set -euo pipefail
+          cargo generate-lockfile
+          cargo metadata --locked --format-version 1 > /dev/null
+          test -f Cargo.lock
+
+      - name: Commit Cargo.lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRANCH=punctual-publish-staging-20260818
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add exports/source-tree/Cargo.lock
+          if git diff --cached --quiet; then
+            echo "Cargo.lock already up to date"
+            exit 0
+          fi
+          git commit -m "build: add reproducible Cargo.lock [skip ci]"
+          git fetch origin "${BRANCH}"
+          git rebase "origin/${BRANCH}"
+          git push origin "HEAD:${BRANCH}"
