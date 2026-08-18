@@ -1,0 +1,86 @@
+name: Package Punctual 0.1.0-alpha.5 Source
+
+on:
+  push:
+    branches:
+      - punctual-publish-staging-20260818
+    paths:
+      - ".github/workflows/package-punctual-source.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate and package source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f exports/source-tree/Cargo.lock
+          test -f exports/source-tree/README.md
+          test -f exports/source-tree/LICENSE
+          test -f exports/source-tree/SECURITY.md
+          test -f exports/source-tree/THIRD_PARTY_NOTICES.md
+          grep -q 'version = "0.1.0-alpha.5"' exports/source-tree/Cargo.toml
+          python3 exports/source-tree/scripts/rust-delimiter-check.py
+          node --check exports/source-tree/scripts/detect_buttons.js
+          node --check exports/source-tree/scripts/highlight_button.js
+          node --check exports/source-tree/scripts/probe_target.js
+
+          rm -rf dist
+          mkdir -p dist/Punctual-0.1.0-alpha.5
+          cp -a exports/source-tree/. dist/Punctual-0.1.0-alpha.5/
+          rm -rf dist/Punctual-0.1.0-alpha.5/target
+
+          (cd dist && zip -q -r Punctual-0.1.0-alpha.5-source.zip Punctual-0.1.0-alpha.5)
+          tar -C dist -czf dist/Punctual-0.1.0-alpha.5-source.tar.gz Punctual-0.1.0-alpha.5
+          sha256sum \
+            dist/Punctual-0.1.0-alpha.5-source.zip \
+            dist/Punctual-0.1.0-alpha.5-source.tar.gz \
+            > dist/Punctual-0.1.0-alpha.5-source-SHA256SUMS.txt
+
+          cat > dist/source-build-manifest.json <<JSON
+          {
+            "version": "0.1.0-alpha.5",
+            "run_id": "${GITHUB_RUN_ID}",
+            "artifact_name": "Punctual-0.1.0-alpha.5-source",
+            "source_commit": "${GITHUB_SHA}"
+          }
+          JSON
+
+      - name: Upload source bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: Punctual-0.1.0-alpha.5-source
+          path: |
+            dist/Punctual-0.1.0-alpha.5-source.zip
+            dist/Punctual-0.1.0-alpha.5-source.tar.gz
+            dist/Punctual-0.1.0-alpha.5-source-SHA256SUMS.txt
+            dist/source-build-manifest.json
+          retention-days: 2
+          if-no-files-found: error
+
+      - name: Publish source artifact metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p exports/build-results/source
+          cp dist/source-build-manifest.json exports/build-results/source/MANIFEST.json
+          cp dist/Punctual-0.1.0-alpha.5-source-SHA256SUMS.txt exports/build-results/source/SHA256SUMS.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin punctual-publish-staging-20260818
+          git rebase origin/punctual-publish-staging-20260818
+          git add exports/build-results/source
+          if ! git diff --cached --quiet; then
+            git commit -m "build: record Punctual source artifact [skip ci]"
+            git push origin HEAD:punctual-publish-staging-20260818
+          fi
