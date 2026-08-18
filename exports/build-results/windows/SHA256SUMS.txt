@@ -1,0 +1,2 @@
+dfceeb0e6c045f940384a7c4f411b5cbf8063635c0cf3f751afc047bc00336ff  Punctual-0.1.0-alpha.5-windows-x64-setup.exe
+ecc9639a29360844ee81b9ac34d962900d19c1febd053331c9f9af59e457060b  Punctual-0.1.0-alpha.5-windows-x64-portable.zip

@@ -1,0 +1,1 @@
+9f574c3eac812762c7a96de57843ba310cf7dc4060ccafc3cfd2cf18cd242607  Punctual-0.1.0-alpha.5-macos-arm64.dmg
