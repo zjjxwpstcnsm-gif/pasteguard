@@ -1,0 +1,53 @@
+name: Snapshot Punctual Build Status
+
+on:
+  push:
+    branches:
+      - punctual-publish-staging-20260818
+    paths:
+      - ".github/workflows/snapshot-punctual-build-status.yml"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BRANCH: punctual-publish-staging-20260818
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Read current workflow status
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p exports/build-results/status
+          for entry in \
+            windows:build-punctual-windows-release.yml \
+            macos:build-punctual-macos-release.yml \
+            collector:collect-punctual-release-artifacts.yml; do
+            name="${entry%%:*}"
+            workflow="${entry#*:}"
+            gh api -X GET \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs" \
+              -f branch="${BRANCH}" \
+              -f per_page=1 \
+              --jq '.workflow_runs[0] | {id, name, head_sha, status, conclusion, created_at, updated_at, html_url}' \
+              > "exports/build-results/status/${name}.json"
+          done
+      - name: Commit snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin "${BRANCH}"
+          git rebase "origin/${BRANCH}"
+          git add exports/build-results/status
+          git commit -m "build: snapshot Punctual build status [skip ci]"
+          git push origin "HEAD:${BRANCH}"
