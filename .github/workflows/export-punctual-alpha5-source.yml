@@ -89,7 +89,18 @@ jobs:
           tar -C work -cJf Punctual-0.1.0-alpha.5-source.tar.xz punctual-click
           sha256sum Punctual-0.1.0-alpha.5-source.tar.xz > Punctual-0.1.0-alpha.5-source.tar.xz.sha256
 
-      - name: Commit source archive to staging branch
+          rm -rf exports/source-parts
+          mkdir -p exports/source-parts
+          base64 -w 0 Punctual-0.1.0-alpha.5-source.tar.xz | split -b 12000 -d -a 3 - exports/source-parts/part-
+          cp Punctual-0.1.0-alpha.5-source.tar.xz.sha256 exports/source-parts/SHA256SUMS
+          {
+            echo "encoding=base64"
+            echo "archive=Punctual-0.1.0-alpha.5-source.tar.xz"
+            echo "parts=$(find exports/source-parts -name 'part-*' | wc -l | tr -d ' ')"
+            echo "bytes=$(stat -c %s Punctual-0.1.0-alpha.5-source.tar.xz)"
+          } > exports/source-parts/MANIFEST
+
+      - name: Commit source export to staging branch
         shell: bash
         run: |
           set -euo pipefail
@@ -98,11 +109,11 @@ jobs:
           cp Punctual-0.1.0-alpha.5-source.tar.xz.sha256 exports/
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add exports/Punctual-0.1.0-alpha.5-source.tar.xz exports/Punctual-0.1.0-alpha.5-source.tar.xz.sha256
+          git add exports/Punctual-0.1.0-alpha.5-source.tar.xz exports/Punctual-0.1.0-alpha.5-source.tar.xz.sha256 exports/source-parts
           if git diff --cached --quiet; then
-            echo "Source archive already committed"
+            echo "Source export already committed"
           else
-            git commit -m "build: export Punctual alpha.5 source [skip ci]"
+            git commit -m "build: export split Punctual alpha.5 source [skip ci]"
             git push
           fi
 
