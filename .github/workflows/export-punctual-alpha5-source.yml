@@ -1,0 +1,97 @@
+name: Export Punctual 0.1.0-alpha.5 Source
+
+on:
+  push:
+    branches:
+      - punctual-publish-staging-20260818
+    paths:
+      - ".github/workflows/export-punctual-alpha5-source.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct verified source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          check_hash() {
+            local file="$1"
+            local expected="$2"
+            local actual
+            actual="$(sha256sum "${file}" | awk '{print $1}')"
+            echo "${file}: ${actual}"
+            test "${actual}" = "${expected}"
+          }
+
+          cat build/punctual-macos-arm64/chunks/part-* > punctual-source.b64
+          python3 - <<'PY'
+          import base64
+          import re
+          from pathlib import Path
+
+          source = b"".join(Path("punctual-source.b64").read_bytes().split())
+          Path("punctual-source.tar.xz").write_bytes(base64.b64decode(source, validate=True))
+
+          payloads = [
+              ("payloads/punctual-macos-arm64/overlay-scripts.tar.xz.b64", "overlay-scripts.tar.xz"),
+              ("payloads/punctual-macos-arm64/overlay-app.tar.xz.b64", "overlay-app.tar.xz"),
+              ("payloads/punctual-macos-arm64/overlay-product-polish.tar.xz.b64", "overlay-product-polish.tar.xz"),
+              ("payloads/punctual-macos-arm64/overlay-new-tab-alpha4.tar.xz.b64", "overlay-new-tab-alpha4.tar.xz"),
+              ("payloads/punctual-macos-arm64/overlay-browser-alpha5-fix1.tar.xz.b64", "overlay-browser-alpha5-fix1.tar.xz"),
+          ]
+          for source_path, target in payloads:
+              encoded = b"".join(Path(source_path).read_bytes().split())
+              Path(target).write_bytes(base64.b64decode(encoded, validate=True))
+
+          transported = b"".join(
+              part.read_bytes()
+              for part in sorted(Path("payloads/punctual-macos-arm64/overlay-browser-alpha5").glob("part-*"))
+          )
+          normalized = re.sub(rb"[^A-Za-z0-9+/=]", b"", transported)
+          Path("overlay-browser-alpha5.tar.xz").write_bytes(base64.b64decode(normalized, validate=True))
+          PY
+
+          check_hash punctual-source.tar.xz 17402d1468c1bb9d06fe6cfbdabacc14c64e99cd9086a4f4f5025d8797c92efd
+          check_hash overlay-scripts.tar.xz 8578bb9c595ffc5fcf944311754dfb383e952dbd306fb7783d30dc841c6c8f7d
+          check_hash overlay-app.tar.xz 2493959afffb3a7637506c027d970dd2e2af4f03a72e17b0a2f410f9d9fb784f
+          check_hash overlay-product-polish.tar.xz e184f9538dc81c764291f1ef212e71c3f0a4d9595290ffa6837381d28883a16b
+          check_hash overlay-new-tab-alpha4.tar.xz f22d8cac6ececbfe54a5c8221ad595b688f09fa6467aebba6e5d991aaa903f85
+          check_hash overlay-browser-alpha5.tar.xz 8e69443222c31c76ec88706f9c554c480ffdd6115c2019994d03a61103824015
+          check_hash overlay-browser-alpha5-fix1.tar.xz 1018ef18a52a3e1ee3ef38fa184ab9ddc1e57ae33cccb007d959e7300581bbfc
+
+          mkdir -p work
+          tar -xJf punctual-source.tar.xz -C work
+          tar -xJf overlay-scripts.tar.xz -C work/punctual-click
+          tar -xJf overlay-app.tar.xz -C work/punctual-click
+          tar -xJf overlay-product-polish.tar.xz -C work/punctual-click
+          tar -xJf overlay-new-tab-alpha4.tar.xz -C work/punctual-click
+          tar -xJf overlay-browser-alpha5.tar.xz -C work/punctual-click
+          tar -xJf overlay-browser-alpha5-fix1.tar.xz -C work/punctual-click
+
+          grep -q 'version = "0.1.0-alpha.5"' work/punctual-click/Cargo.toml
+          python3 work/punctual-click/scripts/rust-delimiter-check.py
+          node --check work/punctual-click/scripts/detect_buttons.js
+          node --check work/punctual-click/scripts/highlight_button.js
+          node --check work/punctual-click/scripts/probe_target.js
+
+          rm -rf work/punctual-click/target
+          tar -C work -cJf Punctual-0.1.0-alpha.5-source.tar.xz punctual-click
+          sha256sum Punctual-0.1.0-alpha.5-source.tar.xz > Punctual-0.1.0-alpha.5-source.tar.xz.sha256
+
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: Punctual-0.1.0-alpha.5-source
+          path: |
+            Punctual-0.1.0-alpha.5-source.tar.xz
+            Punctual-0.1.0-alpha.5-source.tar.xz.sha256
+          retention-days: 1
