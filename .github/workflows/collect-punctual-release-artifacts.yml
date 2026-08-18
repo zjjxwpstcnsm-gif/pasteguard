@@ -1,0 +1,144 @@
+name: Collect Punctual 0.1.0-alpha.5 Release Artifacts
+
+on:
+  push:
+    branches:
+      - punctual-publish-staging-20260818
+    paths:
+      - ".github/workflows/collect-punctual-release-artifacts.yml"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BRANCH: punctual-publish-staging-20260818
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Wait for Windows and macOS artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p collected/windows collected/macos
+
+          collect_artifact() {
+            local workflow="$1"
+            local artifact_name="$2"
+            local destination="$3"
+            local run_id=""
+
+            for attempt in $(seq 1 90); do
+              mapfile -t run_ids < <(
+                gh api -X GET \
+                  "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs" \
+                  -f branch="${BRANCH}" \
+                  -f per_page=20 \
+                  --jq '.workflow_runs[].id'
+              )
+
+              for candidate in "${run_ids[@]:-}"; do
+                if gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${candidate}/artifacts" \
+                  --jq ".artifacts[] | select(.name == \"${artifact_name}\") | .id" \
+                  | grep -q '[0-9]'; then
+                  run_id="${candidate}"
+                  break
+                fi
+              done
+
+              if [[ -n "${run_id}" ]]; then
+                echo "Found ${artifact_name} in run ${run_id}"
+                break
+              fi
+              echo "Waiting for ${artifact_name} (${attempt}/90)"
+              sleep 20
+            done
+
+            if [[ -z "${run_id}" ]]; then
+              echo "Timed out waiting for ${artifact_name}" >&2
+              return 1
+            fi
+
+            gh run download "${run_id}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --name "${artifact_name}" \
+              --dir "${destination}"
+            printf '%s\n' "${run_id}" > "${destination}/RUN_ID"
+          }
+
+          collect_artifact \
+            build-punctual-windows-release.yml \
+            Punctual-0.1.0-alpha.5-windows-x64 \
+            collected/windows &
+          windows_pid=$!
+
+          collect_artifact \
+            build-punctual-macos-release.yml \
+            Punctual-0.1.0-alpha.5-macos-arm64 \
+            collected/macos &
+          macos_pid=$!
+
+          wait "${windows_pid}"
+          wait "${macos_pid}"
+
+          test -f collected/windows/windows-build-manifest.json
+          test -f collected/macos/macos-build-manifest.json
+          test -f collected/windows/Punctual-0.1.0-alpha.5-windows-x64-setup.exe
+          test -f collected/windows/Punctual-0.1.0-alpha.5-windows-x64-portable.zip
+          test -f collected/macos/Punctual-0.1.0-alpha.5-macos-arm64.dmg
+
+      - name: Verify recorded checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd collected/windows
+          sha256sum -c Punctual-0.1.0-alpha.5-windows-x64-SHA256SUMS.txt
+          cd ../macos
+          sha256sum -c Punctual-0.1.0-alpha.5-macos-arm64-SHA256SUMS.txt
+
+      - name: Commit consolidated build metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p exports/build-results/windows exports/build-results/macos
+          cp collected/windows/windows-build-manifest.json exports/build-results/windows/MANIFEST.json
+          cp collected/windows/Punctual-0.1.0-alpha.5-windows-x64-SHA256SUMS.txt exports/build-results/windows/SHA256SUMS.txt
+          cp collected/windows/RUN_ID exports/build-results/windows/RUN_ID
+          cp collected/macos/macos-build-manifest.json exports/build-results/macos/MANIFEST.json
+          cp collected/macos/Punctual-0.1.0-alpha.5-macos-arm64-SHA256SUMS.txt exports/build-results/macos/SHA256SUMS.txt
+          cp collected/macos/RUN_ID exports/build-results/macos/RUN_ID
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin "${BRANCH}"
+          git rebase "origin/${BRANCH}"
+          git add exports/build-results
+          if git diff --cached --quiet; then
+            echo "Build metadata already committed"
+          else
+            git commit -m "build: record consolidated Punctual release artifacts [skip ci]"
+            git push origin "HEAD:${BRANCH}"
+          fi
+
+      - name: Upload combined release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: Punctual-0.1.0-alpha.5-release-bundle
+          path: |
+            collected/windows/Punctual-0.1.0-alpha.5-windows-x64-setup.exe
+            collected/windows/Punctual-0.1.0-alpha.5-windows-x64-portable.zip
+            collected/windows/Punctual-0.1.0-alpha.5-windows-x64-SHA256SUMS.txt
+            collected/macos/Punctual-0.1.0-alpha.5-macos-arm64.dmg
+            collected/macos/Punctual-0.1.0-alpha.5-macos-arm64-SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 2
+          compression-level: 0
