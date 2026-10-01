@@ -11,7 +11,8 @@
     "preview": "node scripts/serve.mjs dist",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "node scripts/test.mjs",
-    "check": "npm run typecheck && npm run test && npm run build && npm run build:portable"
+    "check": "npm run typecheck && npm run test && npm run build && npm run build:portable",
+    "test:browser": "playwright test"
   },
   "keywords": [
     "redaction",
@@ -26,6 +27,7 @@
     "node": ">=20"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "typescript": "^5.8.3"
   },
   "repository": {

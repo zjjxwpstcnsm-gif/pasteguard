@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pasteguard-v0.1.0';
+const CACHE_NAME = 'pasteguard-v0.1.0-matching-v2';
 const CORE_FILES = ['./', './index.html', './styles.css', './app.js', './favicon.svg'];
 
 self.addEventListener('install', (event) => {

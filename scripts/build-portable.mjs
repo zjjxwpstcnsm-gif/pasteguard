@@ -21,6 +21,8 @@ const moduleFiles = [
   'config.js',
   'engine/luhn.js',
   'engine/detectors.js',
+  'engine/assignments.js',
+  'engine/personal.js',
   'engine/placeholders.js',
   'engine/rules.js',
   'engine/presets.js',
@@ -50,10 +52,10 @@ html = html
   )
   .replace(/^\s*<link rel="icon"[^>]*>\s*$/m, '')
   .replace(/^\s*<link rel="manifest"[^>]*>\s*$/m, '')
-  .replace(/^\s*<link rel="stylesheet" href="\.\/styles\.css" \/>\s*$/m, `    <style>\n${css}\n    </style>`)
+  .replace(/^\s*<link rel="stylesheet" href="\.\/styles\.css" \/>\s*$/m, () => `    <style>\n${css}\n    </style>`)
   .replace(
     /^\s*<script type="module" src="\.\/app\.js"><\/script>\s*$/m,
-    `    <script>\n${bundledJavaScript}\n    </script>`,
+    () => `    <script>\n${bundledJavaScript}\n    </script>`,
   )
   .replace(
     '<span class="privacy-dot" aria-hidden="true"></span>\n            Browser-only processing',

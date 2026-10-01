@@ -1,45 +1,42 @@
 import { detectNamedGroup, detectWholeMatch, mergeDetections } from './detectors.js';
 import { passesLuhn } from './luhn.js';
+import { detectLocalUsernames, detectPhoneNumbers } from './personal.js';
+import { assignmentDetection, assignmentValues, isRedactedPlaceholder, normalizedKey } from './assignments.js';
 import type { Detection, Rule } from './types.js';
-
-function stripMatchingQuotes(detection: Detection): Detection | null {
-  const first = detection.value.at(0);
-  const last = detection.value.at(-1);
-  if ((first === '"' || first === "'") && last === first) {
-    if (detection.value.length <= 2) {
-      return null;
-    }
-    return {
-      ...detection,
-      start: detection.start + 1,
-      end: detection.end - 1,
-      value: detection.value.slice(1, -1),
-      canonicalValue: detection.value.slice(1, -1),
-    };
-  }
-  return detection;
-}
 
 function detectPrivateKeys(text: string): Detection[] {
   return detectWholeMatch(
     text,
-    /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/g,
+    /-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----/g,
     'PRIVATE_KEY',
   );
 }
 
+function detectAuthorization(text: string, bearer: boolean): Detection[] {
+  const detections: Detection[] = [];
+  for (const header of assignmentValues(text, (key) => /^(?:proxy-)?authorization$/i.test(key), 'authorization')) {
+    const match = /^(Bearer|Basic|Token)[\t ]+([A-Za-z0-9._~+/=-]+)/i.exec(header.value);
+    if (!match || (match[1]?.toLowerCase() === 'bearer') !== bearer) {
+      continue;
+    }
+    const credential = match[2];
+    if (!credential) {
+      continue;
+    }
+    const start = header.start + match[0].length - credential.length;
+    detections.push({ start, end: start + credential.length, value: credential,
+      kind: bearer ? 'BEARER_TOKEN' : 'AUTH_CREDENTIAL' });
+  }
+  return detections;
+}
+
 function detectBearerTokens(text: string): Detection[] {
-  return detectNamedGroup(
-    text,
-    /\bAuthorization\s*:\s*Bearer\s+(?<value>[A-Za-z0-9._~+/=-]{8,})/gi,
-    { kind: 'BEARER_TOKEN' },
-  );
+  return detectAuthorization(text, true);
 }
 
 function detectCookieHeaders(text: string): Detection[] {
-  return detectNamedGroup(text, /^(?:Cookie|Set-Cookie)\s*:\s*(?<value>[^\r\n]+)/gim, {
-    kind: 'COOKIE',
-  });
+  return assignmentValues(text, (key) => /^(?:set-)?cookie$/i.test(key), 'cookie')
+    .map((value) => assignmentDetection(value, 'COOKIE'));
 }
 
 function detectJwtTokens(text: string): Detection[] {
@@ -74,30 +71,40 @@ function detectKnownAccessTokens(text: string): Detection[] {
 }
 
 function detectSecretAssignments(text: string): Detection[] {
-  const detections = detectNamedGroup(
-    text,
-    /["']?(?:api[_-]?key|secret(?:[_-]?key)?|client[_-]?secret|access[_-]?token|auth[_-]?token|password|passwd|pwd)["']?\s*(?:=|:)\s*(?<value>"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;#}\]]+)/gi,
-    { kind: 'SECRET' },
-  );
-
-  return detections
-    .map(stripMatchingQuotes)
-    .filter((detection): detection is Detection => detection !== null)
-    .filter((detection) => !/^(?:null|none|undefined|false|true|changeme|example)$/i.test(detection.value));
+  return assignmentValues(text, (key) =>
+    /(?:^|_)(?:api_?key|secret(?:_?(?:key|access_?key))?|client_?secret|(?:access|auth|refresh|id|session)_?token|token|password|passwd|pwd|private_?key)$/.test(normalizedKey(key)),
+  )
+    .filter(({ value }) => !/^(?:null|none|undefined|false|true|changeme|example)$/i.test(value))
+    .map((value) => assignmentDetection(value, 'SECRET'));
 }
 
 function detectSensitiveUrlParameters(text: string): Detection[] {
-  return detectNamedGroup(
-    text,
-    /[?&](?:access[_-]?token|token|api[_-]?key|password|passwd|secret|signature|sig|auth)=?(?<value>[^&#\s]*)/gi,
-    { kind: 'URL_SECRET' },
-  ).filter((detection) => detection.value.length > 0);
+  const detections: Detection[] = [];
+  // Require a complete parameter name and '='. Never match token_count or tokenizer.
+  const parameters = /[?&](?:amp;)?([^=&#\s"'<>]+)=(?<value>[^&#\s"'<>]*)/gd;
+  for (const match of text.matchAll(parameters)) {
+    let key: string;
+    try {
+      key = decodeURIComponent(match[1] ?? '').toLowerCase();
+    } catch {
+      continue;
+    }
+    if (!/^(?:access[_-]?token|refresh[_-]?token|id[_-]?token|token|api[_-]?key|password|passwd|secret|signature|sig|auth|client[_-]?secret|x-amz-(?:signature|credential|security-token)|x-goog-(?:signature|credential))$/.test(key)) {
+      continue;
+    }
+    const value = match.groups?.value;
+    const range = match.indices?.groups?.value;
+    if (value && range && !isRedactedPlaceholder(value)) {
+      detections.push({ start: range[0], end: range[1], value, kind: 'URL_SECRET' });
+    }
+  }
+  return detections;
 }
 
 function detectDatabasePasswords(text: string): Detection[] {
   return detectNamedGroup(
     text,
-    /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|amqp|amqps):\/\/[^:\s/@]+:(?<value>[^@\s/]+)@/gi,
+    /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|amqp|amqps):\/\/[^:\s/@]*:(?<value>[^\s/"\'<>]+)@/gi,
     { kind: 'DATABASE_PASSWORD' },
   );
 }
@@ -105,12 +112,14 @@ function detectDatabasePasswords(text: string): Detection[] {
 function detectEmails(text: string): Detection[] {
   return detectNamedGroup(
     text,
-    /(?<value>[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?)+)/gi,
-    {
-      kind: 'EMAIL',
-      canonicalize: (value) => value.toLowerCase(),
-    },
-  );
+    /(?<![A-Z0-9.!#$%&'*+/=?^_`{|}~-])(?<value>[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?)+)/gi,
+    { kind: 'EMAIL' },
+  ).map((detection) => {
+    // '=' is legal in mailbox local parts, but preserve common log assignment keys.
+    const prefix = /^(?:(?:contact[_-]?)?email(?:[_-]?address)?|mail|user(?:name)?|owner|from|to|cc|bcc)=/i.exec(detection.value)?.[0] ?? '';
+    const value = detection.value.slice(prefix.length);
+    return { ...detection, start: detection.start + prefix.length, value, canonicalValue: value.toLowerCase() };
+  });
 }
 
 function detectPaymentCards(text: string): Detection[] {
@@ -130,53 +139,6 @@ function detectPaymentCards(text: string): Detection[] {
       value,
       canonicalValue: value.replace(/\D/g, ''),
       kind: 'PAYMENT_CARD',
-    });
-  }
-
-  return detections;
-}
-
-function detectPhoneNumbers(text: string): Detection[] {
-  const regex = /(?:\+\d{1,3}[\s().-]*)?(?:\(?\d{2,4}\)?[\s.-]*){2,5}\d{2,4}/g;
-  const detections: Detection[] = [];
-
-  for (const match of text.matchAll(regex)) {
-    const raw = match[0].trim();
-    const originalStart = match.index;
-    if (originalStart === undefined || raw.length === 0) {
-      continue;
-    }
-
-    const leadingTrim = match[0].length - match[0].trimStart().length;
-    const start = originalStart + leadingTrim;
-    const end = start + raw.length;
-    const before = text[start - 1] ?? '';
-    const after = text[end] ?? '';
-    const touchesIdentifier = /[A-Za-z0-9]/.test(before) || /[A-Za-z0-9]/.test(after);
-    const digits = raw.replace(/\D/g, '');
-    const hasPhoneShape = raw.startsWith('+') || /[()]/.test(raw) || (raw.match(/[ .-]/g)?.length ?? 0) >= 2;
-    const looksLikeDate = /^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$/.test(raw);
-    const looksLikeIp = /^(?:\d{1,3}\.){3}\d{1,3}$/.test(raw);
-
-    if (
-      digits.length < 7 ||
-      digits.length > 15 ||
-      !hasPhoneShape ||
-      touchesIdentifier ||
-      looksLikeDate ||
-      looksLikeIp ||
-      passesLuhn(raw)
-    ) {
-      continue;
-    }
-
-    detections.push({
-      start,
-      end,
-      value: raw,
-      canonicalValue: digits,
-      kind: 'PHONE',
-      confidence: 'medium',
     });
   }
 
@@ -222,18 +184,6 @@ function detectMacAddresses(text: string): Detection[] {
   });
 }
 
-function detectLocalUsernames(text: string): Detection[] {
-  return mergeDetections(
-    detectNamedGroup(text, /\/(?:Users|home)\/(?<value>[^/\s]+)(?=\/)/g, {
-      kind: 'LOCAL_USER',
-    }),
-    detectNamedGroup(text, /\b[A-Za-z]:\\Users\\(?<value>[^\\\s]+)(?=\\)/g, {
-      kind: 'LOCAL_USER',
-      canonicalize: (value) => value.toLowerCase(),
-    }),
-  );
-}
-
 function detectUuids(text: string): Detection[] {
   return detectNamedGroup(
     text,
@@ -246,16 +196,9 @@ function detectUuids(text: string): Detection[] {
 }
 
 function detectIdentifierAssignments(text: string): Detection[] {
-  const detections = detectNamedGroup(
-    text,
-    /["']?(?:user|account|customer|session|request|trace|device)[_-]?id["']?\s*(?:=|:)\s*(?<value>"[^"\r\n]*"|'[^'\r\n]*'|[A-Za-z0-9._:-]{4,})/gi,
-    { kind: 'IDENTIFIER' },
-  );
-
-  return detections
-    .map(stripMatchingQuotes)
-    .filter((detection): detection is Detection => detection !== null)
-    .map((detection) => ({ ...detection, confidence: 'medium' as const }));
+  return assignmentValues(text, (key) =>
+    /^(?:user|account|customer|session|request|trace|device)_?id$/.test(normalizedKey(key)),
+  ).map((value) => ({ ...assignmentDetection(value, 'IDENTIFIER'), confidence: 'medium' as const }));
 }
 
 function detectAnsiSequences(text: string): Detection[] {
@@ -305,6 +248,16 @@ export const RULES: Rule[] = [
     priority: 105,
     enabledByDefault: true,
     detect: detectBearerTokens,
+  },
+  {
+    id: 'authorization-credential',
+    label: 'Authorization credentials',
+    description: 'Basic and Token credentials in Authorization and Proxy-Authorization headers.',
+    category: 'secrets',
+    severity: 'critical',
+    priority: 104,
+    enabledByDefault: true,
+    detect: (text) => detectAuthorization(text, false),
   },
   {
     id: 'database-password',

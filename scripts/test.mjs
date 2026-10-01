@@ -5,7 +5,7 @@ import path from 'node:path';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-const build = spawnSync(process.execPath, ['scripts/build.mjs'], {
+const build = spawnSync(process.execPath, ['scripts/build-portable.mjs'], {
   cwd: root,
   stdio: 'inherit',
 });
