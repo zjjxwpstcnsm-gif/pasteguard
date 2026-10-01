@@ -6,6 +6,12 @@ interface Candidate extends Detection {
   rule: Rule;
 }
 
+interface ScanningProjection {
+  text: string;
+  // One entry per UTF-16 code unit, matching RegExp indices and string.slice.
+  originalOffsets: number[] | null;
+}
+
 export interface SanitizeOptions {
   enabledRuleIds?: Iterable<string>;
 }
@@ -19,9 +25,22 @@ export function sanitize(text: string, options: SanitizeOptions = {}): Sanitizat
     return emptyResult([...enabledRuleIds]);
   }
 
-  const candidates = collectCandidates(text, enabledRuleIds);
-  const selected = selectNonOverlapping(candidates);
-  const registry = new PlaceholderRegistry();
+  const hygieneCandidates = collectCandidates(
+    text,
+    enabledRuleIds,
+    (rule) => rule.category === 'hygiene',
+  );
+  const removals = selectNonOverlapping(
+    hygieneCandidates.filter((candidate) => candidate.fixedReplacement === ''),
+  );
+  const projection = createScanningProjection(text, removals);
+  const candidates = collectCandidates(
+    projection.text,
+    enabledRuleIds,
+    (rule) => rule.category !== 'hygiene',
+  ).map((candidate) => mapToOriginal(candidate, projection, text));
+  const selected = selectNonOverlapping([...candidates, ...hygieneCandidates]);
+  const registry = new PlaceholderRegistry(projection.text);
   const lineStarts = createLineStarts(text);
 
   const replacements = selected
@@ -95,11 +114,15 @@ function emptyResult(enabledRuleIds: string[]): SanitizationResult {
   };
 }
 
-function collectCandidates(text: string, enabledRuleIds: Set<string>): Candidate[] {
+function collectCandidates(
+  text: string,
+  enabledRuleIds: Set<string>,
+  includeRule: (rule: Rule) => boolean,
+): Candidate[] {
   const candidates: Candidate[] = [];
 
   for (const rule of RULES) {
-    if (!enabledRuleIds.has(rule.id)) {
+    if (!enabledRuleIds.has(rule.id) || !includeRule(rule)) {
       continue;
     }
 
@@ -129,8 +152,74 @@ function collectCandidates(text: string, enabledRuleIds: Set<string>): Candidate
   return candidates;
 }
 
+function createScanningProjection(text: string, removals: Candidate[]): ScanningProjection {
+  if (removals.length === 0) {
+    return { text, originalOffsets: null };
+  }
+
+  const chunks: string[] = [];
+  const originalOffsets: number[] = [];
+  let cursor = 0;
+
+  function appendUntil(end: number): void {
+    chunks.push(text.slice(cursor, end));
+    for (let index = cursor; index < end; index += 1) {
+      originalOffsets.push(index);
+    }
+  }
+
+  for (const removal of [...removals].sort((left, right) => left.start - right.start)) {
+    appendUntil(removal.start);
+    cursor = removal.end;
+  }
+  appendUntil(text.length);
+
+  return { text: chunks.join(''), originalOffsets };
+}
+
+function mapToOriginal(
+  candidate: Candidate,
+  projection: ScanningProjection,
+  originalText: string,
+): Candidate {
+  if (projection.originalOffsets === null) {
+    return candidate;
+  }
+
+  // Candidate ranges were already validated against the projected text. Every
+  // surviving code unit has an original offset, including both surrogate halves.
+  const start = projection.originalOffsets[candidate.start]!;
+  const end = projection.originalOffsets[candidate.end - 1]! + 1;
+  return {
+    ...candidate,
+    start,
+    end,
+    value: originalText.slice(start, end),
+    canonicalValue: candidate.canonicalValue ?? candidate.value,
+  };
+}
+
 function selectNonOverlapping(candidates: Candidate[]): Candidate[] {
-  const ranked = [...candidates].sort((left, right) => {
+  // A narrow, higher-priority token match must never leave the rest of an
+  // explicitly assigned secret exposed. Equal ranges still use rule priority.
+  const sourceOrder = [...candidates].sort(
+    (left, right) => left.start - right.start || right.end - left.end,
+  );
+  const maximalCandidates: Candidate[] = [];
+  let enclosingSecretStart = -1;
+  let enclosingSecretEnd = -1;
+  for (const candidate of sourceOrder) {
+    const strictlyEnclosed = enclosingSecretEnd > candidate.end ||
+      (enclosingSecretEnd === candidate.end && enclosingSecretStart < candidate.start);
+    if (!strictlyEnclosed) {
+      maximalCandidates.push(candidate);
+    }
+    if (candidate.rule.category === 'secrets' && candidate.end > enclosingSecretEnd) {
+      enclosingSecretStart = candidate.start;
+      enclosingSecretEnd = candidate.end;
+    }
+  }
+  const ranked = maximalCandidates.sort((left, right) => {
     const priority = right.rule.priority - left.rule.priority;
     if (priority !== 0) {
       return priority;

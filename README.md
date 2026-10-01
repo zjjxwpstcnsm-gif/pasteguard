@@ -76,11 +76,11 @@ PasteGuard is a defense-in-depth helper, not a formal data-loss-prevention produ
 
 ## Detection rules
 
-The first release contains 19 deterministic rules grouped into six categories.
+PasteGuard contains 20 deterministic rules grouped into six categories.
 
 | Category | Examples |
 |---|---|
-| Secrets | Private keys, Bearer tokens, cookies, JWTs, known token prefixes, assigned secrets |
+| Secrets | Private keys, Bearer/Basic/Token authorization, cookies, JWTs, known token prefixes, assigned secrets |
 | URLs and connections | Sensitive query parameters and passwords inside database URLs |
 | Personal data | Email addresses, phone-shaped values, Luhn-valid payment card numbers |
 | Network details | IPv4 and MAC addresses |
@@ -153,6 +153,11 @@ Outputs:
 | `npm run build:portable` | Produce `portable/pasteguard-local.html` |
 | `npm run preview` | Serve an existing production build |
 | `npm run check` | Typecheck, test, and build both release formats |
+| `npm run test:browser` | Smoke-test the built hosted and offline apps in Chromium |
+
+To run browser smoke tests locally, first run `npm run check`, then
+`npx playwright install chromium` and `npm run test:browser`. CI installs Chromium and runs these
+checks automatically. Playwright is a development-only dependency; shipped apps remain dependency-free.
 
 ## Browser support
 

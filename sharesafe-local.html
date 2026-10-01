@@ -1551,8 +1551,268 @@ function mergeDetections(...groups) {
 }
 // End bundled module: engine/detectors.js
 
+// Match whole keys rather than suffixes (notpassword and token_count are not secrets).
+// Only horizontal whitespace is allowed: an empty setting must not eat the next line.
+const ASSIGNMENT = /(?<![\w$.-])(?:(["'])([A-Za-z_][\w.-]*)\1|([A-Za-z_][\w.-]*))[\t ]*(?:=|:)[\t ]*/g;
+function normalizedKey(key) {
+    return key.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase().replace(/[.-]/g, '_');
+}
+function isRedactedPlaceholder(value) {
+    return /^<[A-Z][A-Z_]*_\d+>$/.test(value);
+}
+function assignmentValues(text, acceptsKey, headerValue = false) {
+    const values = [];
+    let consumedUntil = 0;
+    for (const match of text.matchAll(ASSIGNMENT)) {
+        if (match.index < consumedUntil) {
+            continue;
+        }
+        // Query parameters have their own separator-aware detector. Treating them as
+        // assignments could consume following public parameters as part of a secret.
+        if (/[?&]$|&amp;$/.test(text.slice(Math.max(0, match.index - 5), match.index))) {
+            continue;
+        }
+        const key = match[2] ?? match[3] ?? '';
+        if (!acceptsKey(key)) {
+            continue;
+        }
+        let start = match.index + match[0].length;
+        let end = start;
+        const quote = text[start];
+        if (headerValue === 'authorization' && quote !== '"' && quote !== "'" && quote !== '`') {
+            // Read only the scheme and credential, not the remainder of a log line.
+            const credential = /(?:Bearer|Basic|Token)[\t ]+[A-Za-z0-9._~+/=-]+/iy;
+            credential.lastIndex = start;
+            if (!credential.exec(text)) {
+                continue;
+            }
+            end = credential.lastIndex;
+        }
+        else if (quote === '"' || quote === "'" || quote === '`') {
+            start += 1;
+            end = start;
+            while (end < text.length && text[end] !== '\r' && text[end] !== '\n') {
+                if (text[end] === '\\' && end + 1 < text.length && !/[\r\n]/.test(text[end + 1] ?? '')) {
+                    end += 2;
+                }
+                else if (text[end] === quote) {
+                    // YAML single-quoted strings escape a quote by doubling it.
+                    if (quote === "'" && text[end + 1] === "'") {
+                        end += 2;
+                    }
+                    else {
+                        break;
+                    }
+                }
+                else {
+                    end += 1;
+                }
+            }
+        }
+        else {
+            // Only the actual surrounding curl quote terminates a raw header. A
+            // Cookie value can itself contain quotes (sid="synthetic").
+            const beforeKey = text[match.index - 1];
+            const enclosingQuote = headerValue && !match[1] &&
+                (beforeKey === '"' || beforeKey === "'" || beforeKey === '`') ? beforeKey : undefined;
+            const terminator = headerValue ? /[\r\n]/ : /[\s,;#}\]"'`]/;
+            while (end < text.length && !terminator.test(text[end] ?? '')) {
+                if (enclosingQuote && text[end] === enclosingQuote) {
+                    break;
+                }
+                if (enclosingQuote && text[end] === '\\' && text[end + 1] === enclosingQuote) {
+                    end += 2;
+                }
+                else {
+                    end += 1;
+                }
+            }
+            while (end > start && /[\t ]/.test(text[end - 1] ?? '')) {
+                end -= 1;
+            }
+        }
+        if (end > start) {
+            consumedUntil = end;
+            const value = text.slice(start, end);
+            if (!isRedactedPlaceholder(value)) {
+                values.push({ key, start, end, value });
+            }
+        }
+    }
+    return values;
+}
+function assignmentDetection(value, kind) {
+    return { start: value.start, end: value.end, value: value.value, kind };
+}
+// End bundled module: engine/assignments.js
+
+/** Home-path components only: this deliberately does not guess usernames in arbitrary paths. */
+function detectLocalUsernames(text) {
+    const prefixes = /\/(?:Users|home)\/|[A-Za-z]:\\{1,2}[Uu][Ss][Ee][Rr][Ss]\\{1,2}/g;
+    const detections = [];
+    for (const match of text.matchAll(prefixes)) {
+        const pathStart = match.index;
+        const before = text[pathStart - 1] ?? '';
+        // Avoid relative paths, URL path segments, and names embedded in identifiers.
+        if (before && !/[\s"'`=:(\[{]/.test(before)) {
+            continue;
+        }
+        const windows = /^[A-Za-z]:/.test(match[0]);
+        let start = pathStart + match[0].length;
+        const componentQuote = /["'`]/.test(text[start] ?? '') ? text[start] : undefined;
+        const pathQuote = /["'`]/.test(before) ? before : undefined;
+        const quote = componentQuote ?? pathQuote;
+        if (componentQuote) {
+            start += 1;
+        }
+        let limit = text.length;
+        if (quote) {
+            const quoteEnd = text.indexOf(quote, start);
+            // An unfinished quote cannot establish a spaced username, but an obvious
+            // unspaced component followed by a path separator is still safe to identify.
+            if (quoteEnd < 0 || /[\r\n]/.test(text.slice(start, quoteEnd))) {
+                const nextBoundary = text.slice(start).search(/[\/\\\s]/);
+                if (nextBoundary < 0 || !/[\/\\]/.test(text[start + nextBoundary] ?? '')) {
+                    continue;
+                }
+                limit = start + nextBoundary;
+            }
+            else {
+                limit = quoteEnd;
+            }
+        }
+        let end = start;
+        while (end < limit) {
+            const character = text[end] ?? '';
+            if (character === '/' || character === '\\' || /[\r\n]/.test(character)) {
+                break;
+            }
+            if (!quote && /[\s"'`<>|?*:,;()\[\]{}]/.test(character)) {
+                break;
+            }
+            end += 1;
+        }
+        // In unquoted prose, sentence punctuation belongs to the surrounding text.
+        if (!quote && text[end] !== '/' && text[end] !== '\\') {
+            while (end > start && /[.!]/.test(text[end - 1] ?? '')) {
+                end -= 1;
+            }
+        }
+        const value = text.slice(start, end);
+        if (!value ||
+            value === '.' ||
+            value === '..' ||
+            value.trim() !== value ||
+            !/^[\p{L}\p{N}_.@$-]+(?: [\p{L}\p{N}_.@$'-]+)*$/u.test(value)) {
+            continue;
+        }
+        detections.push({
+            start,
+            end,
+            value,
+            canonicalValue: windows ? value.toLowerCase() : value,
+            kind: 'LOCAL_USER',
+        });
+    }
+    return detections;
+}
+function hasPersonalPhoneContext(text, start) {
+    // Keep the label adjacent to the value. A mention of "phone" elsewhere is not evidence.
+    return /(?:^|[^\p{L}\p{N}_-])["']?(?:phone(?:[ _-]?number)?|mobile(?:[ _-]?number)?|tel(?:ephone)?(?:[ _-]?number)?|cell(?:[ _-]?phone)?(?:[ _-]?number)?|手机(?:号码?)?|电话(?:号码)?|联系电话)["']?[ \t]*(?:[:=：][ \t]*|[ \t]+)["']?$/iu.test(text.slice(Math.max(0, start - 100), start));
+}
+const personalNorthAmericanPhone = '(?:\\+?1[ .-]?)?(?:\\([2-9]\\d{2}\\)[ ]?[2-9]\\d{2}[ .-]?\\d{4}|[2-9]\\d{2}[ .-][2-9]\\d{2}[ .-]\\d{4})';
+const personalNorthAmericanShape = new RegExp(`^${personalNorthAmericanPhone}$`);
+function hasPersonalPhoneShape(value) {
+    if (/^\+[1-9]/.test(value)) {
+        return true;
+    }
+    // Common North American and trunk-prefixed international grouping. Bare digit strings
+    // need an explicit label; these shapes are a heuristic, not worldwide phone validation.
+    return personalNorthAmericanShape.test(value) ||
+        /^0\d{1,4}[ -]\d{3,4}[ -]\d{3,4}$/.test(value);
+}
+function hasPersonalPhoneDelimiters(value) {
+    // Keep digit runs separated in these expressions to avoid exponential backtracking
+    // on long numeric strings followed by malformed punctuation.
+    const withoutPlus = value.replace(/^\+/, '');
+    return /^\d+(?:[ .-]\d+)*$/.test(withoutPlus) ||
+        /^(?:\d+[ .-]?)?\(\d{1,4}\)[ .-]?\d+(?:[ .-]\d+)*$/.test(withoutPlus);
+}
+function isPersonalNonPhoneContext(text, start) {
+    return /(?:^|[^\p{L}\p{N}_-])["']?(?:version|build(?:[ _-]?(?:id|number))?|(?:user|order|account|request|customer|device|session|trace|ticket)?[ _-]?id|date|timestamp|ip(?:v4|[ _-]?address)?|订单号|编号)["']?[ \t]*[:=：][ \t]*["']?$/iu.test(text.slice(Math.max(0, start - 100), start));
+}
+function createPersonalPhoneDetection(text, start, value) {
+    const end = start + value.length;
+    const before = text[start - 1] ?? '';
+    const after = text[end] ?? '';
+    const digits = value.replace(/\D/g, '');
+    const context = hasPersonalPhoneContext(text, start);
+    const embedded = /[\p{L}\p{N}_+.-]/u.test(before) || /[\p{L}\p{N}_+-]/u.test(after) ||
+        (after === '.' && /\d/.test(text[end + 1] ?? ''));
+    const date = /^(?:\d{4}[-.]\d{1,2}[-.]\d{1,2}|\d{1,2}[-.]\d{1,2}[-.]\d{2,4})(?:$| )/.test(value);
+    const ip = /^(?:\d{1,3}\.){3}\d{1,3}$/.test(value);
+    if (digits.length < 7 ||
+        digits.length > 15 ||
+        /^(\d)\1+$/.test(digits) ||
+        embedded ||
+        date ||
+        ip ||
+        isPersonalNonPhoneContext(text, start) ||
+        !hasPersonalPhoneDelimiters(value) ||
+        (!context && !hasPersonalPhoneShape(value)) ||
+        passesLuhn(value)) {
+        return null;
+    }
+    return {
+        start,
+        end,
+        value,
+        canonicalValue: digits,
+        kind: 'PHONE',
+        confidence: 'medium',
+    };
+}
+function detectPhoneNumbers(text) {
+    // Consume the whole numeric run before validating it. This prevents a long ID, date,
+    // or dotted version from being redacted as a shorter plausible telephone substring.
+    const candidates = /(?:\+\d|\(\d{1,4}\)|\d)[\d ().-]*\d/g;
+    const detections = [];
+    for (const match of text.matchAll(candidates)) {
+        const detection = createPersonalPhoneDetection(text, match.index, match[0]);
+        if (detection) {
+            detections.push(detection);
+        }
+    }
+    // A broad numeric run can contain two adjacent US phone numbers. Recognize their
+    // complete, fixed-length shapes separately instead of merging or truncating them.
+    const separateDetections = [];
+    let broadIndex = 0;
+    for (const match of text.matchAll(new RegExp(personalNorthAmericanPhone, 'g'))) {
+        const detection = createPersonalPhoneDetection(text, match.index, match[0]);
+        if (!detection) {
+            continue;
+        }
+        while (broadIndex < detections.length && (detections[broadIndex]?.end ?? 0) <= detection.start) {
+            broadIndex += 1;
+        }
+        const existing = detections[broadIndex];
+        if (!existing || existing.start >= detection.end) {
+            separateDetections.push(detection);
+        }
+    }
+    return detections.concat(separateDetections).sort((left, right) => left.start - right.start);
+}
+// End bundled module: engine/personal.js
+
 class PlaceholderRegistry {
     values = new Map();
+    reserved = new Set();
+    nextIndexes = new Map();
+    constructor(text = '') {
+        for (const match of text.matchAll(/<[A-Z][A-Z_]*_\d+>/g)) {
+            this.reserved.add(match[0]);
+        }
+    }
     get(kind, value) {
         const normalizedKind = normalizeKind(kind);
         let valuesForKind = this.values.get(normalizedKind);
@@ -1562,7 +1822,11 @@ class PlaceholderRegistry {
         }
         let index = valuesForKind.get(value);
         if (index === undefined) {
-            index = valuesForKind.size + 1;
+            index = this.nextIndexes.get(normalizedKind) ?? 1;
+            while (this.reserved.has(`<${normalizedKind}_${index}>`)) {
+                index += 1;
+            }
+            this.nextIndexes.set(normalizedKind, index + 1);
             valuesForKind.set(value, index);
         }
         return `<${normalizedKind}_${index}>`;
@@ -1577,33 +1841,32 @@ function normalizeKind(kind) {
 }
 // End bundled module: engine/placeholders.js
 
-function stripMatchingQuotes(detection) {
-    const first = detection.value.at(0);
-    const last = detection.value.at(-1);
-    if ((first === '"' || first === "'") && last === first) {
-        if (detection.value.length <= 2) {
-            return null;
-        }
-        return {
-            ...detection,
-            start: detection.start + 1,
-            end: detection.end - 1,
-            value: detection.value.slice(1, -1),
-            canonicalValue: detection.value.slice(1, -1),
-        };
-    }
-    return detection;
-}
 function detectPrivateKeys(text) {
-    return detectWholeMatch(text, /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/g, 'PRIVATE_KEY');
+    return detectWholeMatch(text, /-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----/g, 'PRIVATE_KEY');
+}
+function detectAuthorization(text, bearer) {
+    const detections = [];
+    for (const header of assignmentValues(text, (key) => /^(?:proxy-)?authorization$/i.test(key), 'authorization')) {
+        const match = /^(Bearer|Basic|Token)[\t ]+([A-Za-z0-9._~+/=-]+)/i.exec(header.value);
+        if (!match || (match[1]?.toLowerCase() === 'bearer') !== bearer) {
+            continue;
+        }
+        const credential = match[2];
+        if (!credential) {
+            continue;
+        }
+        const start = header.start + match[0].length - credential.length;
+        detections.push({ start, end: start + credential.length, value: credential,
+            kind: bearer ? 'BEARER_TOKEN' : 'AUTH_CREDENTIAL' });
+    }
+    return detections;
 }
 function detectBearerTokens(text) {
-    return detectNamedGroup(text, /\bAuthorization\s*:\s*Bearer\s+(?<value>[A-Za-z0-9._~+/=-]{8,})/gi, { kind: 'BEARER_TOKEN' });
+    return detectAuthorization(text, true);
 }
 function detectCookieHeaders(text) {
-    return detectNamedGroup(text, /^(?:Cookie|Set-Cookie)\s*:\s*(?<value>[^\r\n]+)/gim, {
-        kind: 'COOKIE',
-    });
+    return assignmentValues(text, (key) => /^(?:set-)?cookie$/i.test(key), 'cookie')
+        .map((value) => assignmentDetection(value, 'COOKIE'));
 }
 function detectJwtTokens(text) {
     return detectNamedGroup(text, /\b(?<value>eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,})\b/g, { kind: 'JWT' });
@@ -1624,22 +1887,42 @@ function detectKnownAccessTokens(text) {
     }));
 }
 function detectSecretAssignments(text) {
-    const detections = detectNamedGroup(text, /["']?(?:api[_-]?key|secret(?:[_-]?key)?|client[_-]?secret|access[_-]?token|auth[_-]?token|password|passwd|pwd)["']?\s*(?:=|:)\s*(?<value>"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;#}\]]+)/gi, { kind: 'SECRET' });
-    return detections
-        .map(stripMatchingQuotes)
-        .filter((detection) => detection !== null)
-        .filter((detection) => !/^(?:null|none|undefined|false|true|changeme|example)$/i.test(detection.value));
+    return assignmentValues(text, (key) => /(?:^|_)(?:api_?key|secret(?:_?(?:key|access_?key))?|client_?secret|(?:access|auth|refresh|id|session)_?token|token|password|passwd|pwd|private_?key)$/.test(normalizedKey(key)))
+        .filter(({ value }) => !/^(?:null|none|undefined|false|true|changeme|example)$/i.test(value))
+        .map((value) => assignmentDetection(value, 'SECRET'));
 }
 function detectSensitiveUrlParameters(text) {
-    return detectNamedGroup(text, /[?&](?:access[_-]?token|token|api[_-]?key|password|passwd|secret|signature|sig|auth)=?(?<value>[^&#\s]*)/gi, { kind: 'URL_SECRET' }).filter((detection) => detection.value.length > 0);
+    const detections = [];
+    // Require a complete parameter name and '='. Never match token_count or tokenizer.
+    const parameters = /[?&](?:amp;)?([^=&#\s"'<>]+)=(?<value>[^&#\s"'<>]*)/gd;
+    for (const match of text.matchAll(parameters)) {
+        let key;
+        try {
+            key = decodeURIComponent(match[1] ?? '').toLowerCase();
+        }
+        catch {
+            continue;
+        }
+        if (!/^(?:access[_-]?token|refresh[_-]?token|id[_-]?token|token|api[_-]?key|password|passwd|secret|signature|sig|auth|client[_-]?secret|x-amz-(?:signature|credential|security-token)|x-goog-(?:signature|credential))$/.test(key)) {
+            continue;
+        }
+        const value = match.groups?.value;
+        const range = match.indices?.groups?.value;
+        if (value && range && !isRedactedPlaceholder(value)) {
+            detections.push({ start: range[0], end: range[1], value, kind: 'URL_SECRET' });
+        }
+    }
+    return detections;
 }
 function detectDatabasePasswords(text) {
-    return detectNamedGroup(text, /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|amqp|amqps):\/\/[^:\s/@]+:(?<value>[^@\s/]+)@/gi, { kind: 'DATABASE_PASSWORD' });
+    return detectNamedGroup(text, /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|amqp|amqps):\/\/[^:\s/@]*:(?<value>[^\s/"\'<>]+)@/gi, { kind: 'DATABASE_PASSWORD' });
 }
 function detectEmails(text) {
-    return detectNamedGroup(text, /(?<value>[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?)+)/gi, {
-        kind: 'EMAIL',
-        canonicalize: (value) => value.toLowerCase(),
+    return detectNamedGroup(text, /(?<![A-Z0-9.!#$%&'*+/=?^_`{|}~-])(?<value>[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?)+)/gi, { kind: 'EMAIL' }).map((detection) => {
+        // '=' is legal in mailbox local parts, but preserve common log assignment keys.
+        const prefix = /^(?:(?:contact[_-]?)?email(?:[_-]?address)?|mail|user(?:name)?|owner|from|to|cc|bcc)=/i.exec(detection.value)?.[0] ?? '';
+        const value = detection.value.slice(prefix.length);
+        return { ...detection, start: detection.start + prefix.length, value, canonicalValue: value.toLowerCase() };
     });
 }
 function detectPaymentCards(text) {
@@ -1657,45 +1940,6 @@ function detectPaymentCards(text) {
             value,
             canonicalValue: value.replace(/\D/g, ''),
             kind: 'PAYMENT_CARD',
-        });
-    }
-    return detections;
-}
-function detectPhoneNumbers(text) {
-    const regex = /(?:\+\d{1,3}[\s().-]*)?(?:\(?\d{2,4}\)?[\s.-]*){2,5}\d{2,4}/g;
-    const detections = [];
-    for (const match of text.matchAll(regex)) {
-        const raw = match[0].trim();
-        const originalStart = match.index;
-        if (originalStart === undefined || raw.length === 0) {
-            continue;
-        }
-        const leadingTrim = match[0].length - match[0].trimStart().length;
-        const start = originalStart + leadingTrim;
-        const end = start + raw.length;
-        const before = text[start - 1] ?? '';
-        const after = text[end] ?? '';
-        const touchesIdentifier = /[A-Za-z0-9]/.test(before) || /[A-Za-z0-9]/.test(after);
-        const digits = raw.replace(/\D/g, '');
-        const hasPhoneShape = raw.startsWith('+') || /[()]/.test(raw) || (raw.match(/[ .-]/g)?.length ?? 0) >= 2;
-        const looksLikeDate = /^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$/.test(raw);
-        const looksLikeIp = /^(?:\d{1,3}\.){3}\d{1,3}$/.test(raw);
-        if (digits.length < 7 ||
-            digits.length > 15 ||
-            !hasPhoneShape ||
-            touchesIdentifier ||
-            looksLikeDate ||
-            looksLikeIp ||
-            passesLuhn(raw)) {
-            continue;
-        }
-        detections.push({
-            start,
-            end,
-            value: raw,
-            canonicalValue: digits,
-            kind: 'PHONE',
-            confidence: 'medium',
         });
     }
     return detections;
@@ -1733,14 +1977,6 @@ function detectMacAddresses(text) {
         canonicalize: (value) => value.toLowerCase().replace(/-/g, ':'),
     });
 }
-function detectLocalUsernames(text) {
-    return mergeDetections(detectNamedGroup(text, /\/(?:Users|home)\/(?<value>[^/\s]+)(?=\/)/g, {
-        kind: 'LOCAL_USER',
-    }), detectNamedGroup(text, /\b[A-Za-z]:\\Users\\(?<value>[^\\\s]+)(?=\\)/g, {
-        kind: 'LOCAL_USER',
-        canonicalize: (value) => value.toLowerCase(),
-    }));
-}
 function detectUuids(text) {
     return detectNamedGroup(text, /\b(?<value>[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\b/gi, {
         kind: 'UUID',
@@ -1748,11 +1984,7 @@ function detectUuids(text) {
     });
 }
 function detectIdentifierAssignments(text) {
-    const detections = detectNamedGroup(text, /["']?(?:user|account|customer|session|request|trace|device)[_-]?id["']?\s*(?:=|:)\s*(?<value>"[^"\r\n]*"|'[^'\r\n]*'|[A-Za-z0-9._:-]{4,})/gi, { kind: 'IDENTIFIER' });
-    return detections
-        .map(stripMatchingQuotes)
-        .filter((detection) => detection !== null)
-        .map((detection) => ({ ...detection, confidence: 'medium' }));
+    return assignmentValues(text, (key) => /^(?:user|account|customer|session|request|trace|device)_?id$/.test(normalizedKey(key))).map((value) => ({ ...assignmentDetection(value, 'IDENTIFIER'), confidence: 'medium' }));
 }
 function detectAnsiSequences(text) {
     return detectWholeMatch(text, /\u001B(?:\[[0-?]*[ -/]*[@-~]|[@-_])/g, 'ANSI_SEQUENCE', '');
@@ -1793,6 +2025,16 @@ const RULES = [
         priority: 105,
         enabledByDefault: true,
         detect: detectBearerTokens,
+    },
+    {
+        id: 'authorization-credential',
+        label: 'Authorization credentials',
+        description: 'Basic and Token credentials in Authorization and Proxy-Authorization headers.',
+        category: 'secrets',
+        severity: 'critical',
+        priority: 104,
+        enabledByDefault: true,
+        detect: (text) => detectAuthorization(text, false),
     },
     {
         id: 'database-password',
@@ -1996,9 +2238,12 @@ function sanitize(text, options = {}) {
     if (text.length === 0) {
         return emptyResult([...enabledRuleIds]);
     }
-    const candidates = collectCandidates(text, enabledRuleIds);
-    const selected = selectNonOverlapping(candidates);
-    const registry = new PlaceholderRegistry();
+    const hygieneCandidates = collectCandidates(text, enabledRuleIds, (rule) => rule.category === 'hygiene');
+    const removals = selectNonOverlapping(hygieneCandidates.filter((candidate) => candidate.fixedReplacement === ''));
+    const projection = createScanningProjection(text, removals);
+    const candidates = collectCandidates(projection.text, enabledRuleIds, (rule) => rule.category !== 'hygiene').map((candidate) => mapToOriginal(candidate, projection, text));
+    const selected = selectNonOverlapping([...candidates, ...hygieneCandidates]);
+    const registry = new PlaceholderRegistry(projection.text);
     const lineStarts = createLineStarts(text);
     const replacements = selected
         .sort((left, right) => left.start - right.start || left.end - right.end)
@@ -2061,10 +2306,10 @@ function emptyResult(enabledRuleIds) {
         },
     };
 }
-function collectCandidates(text, enabledRuleIds) {
+function collectCandidates(text, enabledRuleIds, includeRule) {
     const candidates = [];
     for (const rule of RULES) {
-        if (!enabledRuleIds.has(rule.id)) {
+        if (!enabledRuleIds.has(rule.id) || !includeRule(rule)) {
             continue;
         }
         let detections;
@@ -2088,8 +2333,61 @@ function collectCandidates(text, enabledRuleIds) {
     }
     return candidates;
 }
+function createScanningProjection(text, removals) {
+    if (removals.length === 0) {
+        return { text, originalOffsets: null };
+    }
+    const chunks = [];
+    const originalOffsets = [];
+    let cursor = 0;
+    function appendUntil(end) {
+        chunks.push(text.slice(cursor, end));
+        for (let index = cursor; index < end; index += 1) {
+            originalOffsets.push(index);
+        }
+    }
+    for (const removal of [...removals].sort((left, right) => left.start - right.start)) {
+        appendUntil(removal.start);
+        cursor = removal.end;
+    }
+    appendUntil(text.length);
+    return { text: chunks.join(''), originalOffsets };
+}
+function mapToOriginal(candidate, projection, originalText) {
+    if (projection.originalOffsets === null) {
+        return candidate;
+    }
+    // Candidate ranges were already validated against the projected text. Every
+    // surviving code unit has an original offset, including both surrogate halves.
+    const start = projection.originalOffsets[candidate.start];
+    const end = projection.originalOffsets[candidate.end - 1] + 1;
+    return {
+        ...candidate,
+        start,
+        end,
+        value: originalText.slice(start, end),
+        canonicalValue: candidate.canonicalValue ?? candidate.value,
+    };
+}
 function selectNonOverlapping(candidates) {
-    const ranked = [...candidates].sort((left, right) => {
+    // A narrow, higher-priority token match must never leave the rest of an
+    // explicitly assigned secret exposed. Equal ranges still use rule priority.
+    const sourceOrder = [...candidates].sort((left, right) => left.start - right.start || right.end - left.end);
+    const maximalCandidates = [];
+    let enclosingSecretStart = -1;
+    let enclosingSecretEnd = -1;
+    for (const candidate of sourceOrder) {
+        const strictlyEnclosed = enclosingSecretEnd > candidate.end ||
+            (enclosingSecretEnd === candidate.end && enclosingSecretStart < candidate.start);
+        if (!strictlyEnclosed) {
+            maximalCandidates.push(candidate);
+        }
+        if (candidate.rule.category === 'secrets' && candidate.end > enclosingSecretEnd) {
+            enclosingSecretStart = candidate.start;
+            enclosingSecretEnd = candidate.end;
+        }
+    }
+    const ranked = maximalCandidates.sort((left, right) => {
         const priority = right.rule.priority - left.rule.priority;
         if (priority !== 0) {
             return priority;

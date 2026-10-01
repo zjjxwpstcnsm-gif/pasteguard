@@ -1,5 +1,13 @@
 export class PlaceholderRegistry {
   private readonly values = new Map<string, Map<string, number>>();
+  private readonly reserved = new Set<string>();
+  private readonly nextIndexes = new Map<string, number>();
+
+  constructor(text = '') {
+    for (const match of text.matchAll(/<[A-Z][A-Z_]*_\d+>/g)) {
+      this.reserved.add(match[0]);
+    }
+  }
 
   get(kind: string, value: string): string {
     const normalizedKind = normalizeKind(kind);
@@ -11,7 +19,11 @@ export class PlaceholderRegistry {
 
     let index = valuesForKind.get(value);
     if (index === undefined) {
-      index = valuesForKind.size + 1;
+      index = this.nextIndexes.get(normalizedKind) ?? 1;
+      while (this.reserved.has(`<${normalizedKind}_${index}>`)) {
+        index += 1;
+      }
+      this.nextIndexes.set(normalizedKind, index + 1);
       valuesForKind.set(value, index);
     }
 
